@@ -6,6 +6,7 @@ import Observation
 @Observable
 final class BrowserModel {
     let connection: CachedConnection
+    let issueReader: IssueReader
     var queryText = ""
     private(set) var projects: [JiraProject] = []
     private(set) var projectsFetchedAt: Date?
@@ -18,12 +19,16 @@ final class BrowserModel {
     private(set) var isSearching = false
     private(set) var errorMessage: String?
     private(set) var projectError: String?
+    private(set) var accountAvatar: CachedAvatar?
+    private(set) var projectAvatars: [URL: CachedAvatar] = [:]
 
     @ObservationIgnored private let cache: ConnectionCache
     @ObservationIgnored private let client: JiraClient
     @ObservationIgnored private let tokenStore = TokenStore()
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var projectTask: Task<Void, Never>?
+    @ObservationIgnored private var accountAvatarTask: Task<Void, Never>?
+    @ObservationIgnored private var projectAvatarTasks: [URL: Task<Void, Never>] = [:]
     @ObservationIgnored private var selectionTask: Task<Void, Never>?
     @ObservationIgnored private var requestID = UUID()
     @ObservationIgnored private var selectionID = UUID()
@@ -32,6 +37,12 @@ final class BrowserModel {
         self.connection = connection
         self.cache = cache
         self.client = client
+        issueReader = IssueReader(site: connection.site, account: connection.user.identifier, cache: cache, client: client) {
+            guard let token = try TokenStore().load(site: connection.site.identifier, account: connection.user.identifier) else {
+                throw JiraError.missingToken
+            }
+            return token
+        }
     }
 
     var selectedProject: JiraProject? { projects.first { $0.id == selectedProjectID } }
@@ -40,6 +51,7 @@ final class BrowserModel {
 
     func restore() async {
         guard isRestoring else { return }
+        loadAccountAvatar()
         do {
             if let saved = try await cache.loadProjects(site: site, account: account) { apply(saved) }
             let selection = try await cache.loadSelection(site: site, account: account)
@@ -75,6 +87,7 @@ final class BrowserModel {
 
     func selectProject(_ id: String?, cachedInput: String? = nil, searchIfMissing: Bool = true) {
         cancelSearch()
+        issueReader.close()
         selectionTask?.cancel()
         selectionID = UUID()
         let generation = selectionID
@@ -122,10 +135,56 @@ final class BrowserModel {
     }
 
     func stop() {
+        issueReader.close()
         cancelSearch()
         projectTask?.cancel()
+        accountAvatarTask?.cancel()
+        for task in projectAvatarTasks.values { task.cancel() }
         selectionTask?.cancel()
         selectionID = UUID()
+    }
+
+    func loadProjectAvatar(_ project: JiraProject) {
+        guard let url = project.avatarURL, projectAvatarTasks[url] == nil else { return }
+        if let saved = projectAvatars[url], Date().timeIntervalSince(saved.fetchedAt) < 86_400 { return }
+        projectAvatarTasks[url] = Task {
+            defer { projectAvatarTasks[url] = nil }
+            do {
+                if let saved = try await cache.loadAvatar(site: site, account: account, url: url) {
+                    try Task.checkCancellation()
+                    projectAvatars[url] = saved
+                    if Date().timeIntervalSince(saved.fetchedAt) < 86_400 { return }
+                }
+                let avatar = try await client.avatar(site: connection.site, token: credentials(), url: url)
+                try Task.checkCancellation()
+                try await cache.saveAvatar(avatar, site: site, account: account, url: url)
+                try Task.checkCancellation()
+                projectAvatars[url] = avatar
+            } catch {
+                // Keep the cached project image when Jira is unavailable.
+            }
+        }
+    }
+
+    private func loadAccountAvatar() {
+        guard let url = connection.profileUser.avatarURL else { return }
+        accountAvatarTask?.cancel()
+        accountAvatarTask = Task {
+            do {
+                if let saved = try await cache.loadAvatar(site: site, account: account, url: url) {
+                    try Task.checkCancellation()
+                    accountAvatar = saved
+                    if Date().timeIntervalSince(saved.fetchedAt) < 86_400 { return }
+                }
+                let avatar = try await client.avatar(site: connection.site, token: credentials(), url: url)
+                try Task.checkCancellation()
+                try await cache.saveAvatar(avatar, site: site, account: account, url: url)
+                try Task.checkCancellation()
+                accountAvatar = try await cache.loadAvatar(site: site, account: account, url: url)
+            } catch {
+                // Preserve the cached image or account icon when the image cannot be refreshed.
+            }
+        }
     }
 
     private func startSearch(query: ProjectQuery, append: Bool) {
@@ -184,9 +243,13 @@ final class BrowserModel {
         projectsFetchedAt = saved.fetchedAt
     }
 
-    private func credentials() throws -> String {
-        guard let token = try tokenStore.load(site: site, account: account) else { throw JiraError.missingToken }
-        return token
+    private func credentials() async throws -> String {
+        let credential = try await Task.detached { [tokenStore, site, account] in
+            guard let token = try tokenStore.load(site: site, account: account) else { throw JiraError.missingToken }
+            return token
+        }.value
+        try Task.checkCancellation()
+        return credential
     }
 
     private func message(for error: Error) -> String {

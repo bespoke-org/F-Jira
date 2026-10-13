@@ -31,7 +31,12 @@ public struct JiraUser: Codable, Sendable {
     public let displayName: String
     public let key: String?
     public let active: Bool?
+    public let avatarUrls: [String: URL]?
     public var identifier: String { key ?? name }
+    public var avatarURL: URL? {
+        ["48x48", "32x32", "24x24", "16x16"].compactMap { avatarUrls?[$0] }.first
+            ?? avatarUrls?.sorted { $0.key < $1.key }.first?.value
+    }
 }
 
 public struct JiraServer: Codable, Sendable {
@@ -46,6 +51,14 @@ public struct CachedConnection: Codable, Sendable {
     public let fetchedAt: Date
     public let userResponse: Data
     public let serverResponse: Data
+
+    public var profileUser: JiraUser {
+        // Older snapshots omitted avatar URLs in the typed user but retained the full response.
+        guard user.avatarURL == nil,
+              let decoded = try? JSONDecoder().decode(JiraUser.self, from: userResponse),
+              decoded.identifier == user.identifier else { return user }
+        return decoded
+    }
 }
 
 public enum JiraError: LocalizedError, Equatable {
@@ -104,7 +117,7 @@ public struct URLSessionTransport: JiraTransport {
 }
 
 public struct JiraClient: Sendable {
-    private let transport: any JiraTransport
+    let transport: any JiraTransport
 
     public init(transport: any JiraTransport = URLSessionTransport()) {
         self.transport = transport
@@ -125,10 +138,15 @@ public struct JiraClient: Sendable {
         )
     }
 
-    func fetch(_ resource: String, site: JiraSite, token: String, body: Data? = nil) async throws -> Data {
+    func fetch(_ resource: String, site: JiraSite, token: String, body: Data? = nil, queryItems: [URLQueryItem] = []) async throws -> Data {
         guard !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !token.contains("\n"), !token.contains("\r") else { throw JiraError.missingToken }
-        var request = URLRequest(url: site.endpoint(resource))
+        guard var components = URLComponents(url: site.endpoint(resource), resolvingAgainstBaseURL: false) else {
+            throw JiraError.invalidURL
+        }
+        if !queryItems.isEmpty { components.queryItems = queryItems }
+        guard let url = components.url else { throw JiraError.invalidURL }
+        var request = URLRequest(url: url)
         request.httpMethod = body == nil ? "GET" : "POST"
         request.httpBody = body
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }

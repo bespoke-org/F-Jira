@@ -26,9 +26,11 @@ final class IssueSearchTests: XCTestCase {
     }
 
     func testLoadsProjectsAndRetainsUnmodeledFields() async throws {
-        let transport = StubTransport([(200, #"[{"id":"10000","key":"EX","name":"Example","extra":"keep"}]"#)])
+        let transport = StubTransport([(200, #"[{"id":"10000","key":"EX","name":"Example","avatarUrls":{"16x16":"https://jira.example.com/avatar/small.png","48x48":"https://jira.example.com/avatar/project.png"},"extra":"keep"},{"id":"20000","key":"OLD","name":"Older cached project"}]"#)])
         let result = try await JiraClient(transport: transport).projects(site: JiraSite("https://jira.example.com/jira"), token: "token")
         XCTAssertEqual(result.projects.first?.key, "EX")
+        XCTAssertEqual(result.projects.first?.avatarURL?.absoluteString, "https://jira.example.com/avatar/project.png")
+        XCTAssertNil(result.projects.last?.avatarURL)
         XCTAssertTrue(String(decoding: result.response, as: UTF8.self).contains("keep"))
         let requests = await transport.capturedRequests()
         XCTAssertEqual(requests.first?.url?.path, "/jira/rest/api/2/project")
@@ -136,7 +138,7 @@ final class IssueSearchTests: XCTestCase {
         let path = directory.appending(path: "cache.sqlite").path
         let cache = try ConnectionCache(path: path)
         let client = JiraClient(transport: StubTransport([
-            (200, #"[{"id":"10000","key":"EX","name":"Example"}]"#),
+            (200, #"[{"id":"10000","key":"EX","name":"Example","avatarUrls":{"48x48":"https://jira.example.com/avatar/project.png"}}]"#),
             (200, pageJSON(start: 0, total: 1, keys: ["EX-1"])),
             (503, "unavailable")
         ]))
@@ -155,6 +157,7 @@ final class IssueSearchTests: XCTestCase {
         let restoredProjects = try await reopened.loadProjects(site: site.identifier, account: "alice")
         let restoredSearch = try await reopened.loadSearch(site: site.identifier, account: "alice", query: query)
         XCTAssertEqual(restoredProjects?.response, projects.response)
+        XCTAssertEqual(restoredProjects?.projects.first?.avatarURL, projects.projects.first?.avatarURL)
         XCTAssertEqual(restoredSearch?.issues.map(\.key), ["EX-1"])
     }
 

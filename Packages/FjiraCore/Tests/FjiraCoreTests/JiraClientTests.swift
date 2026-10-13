@@ -4,6 +4,7 @@ import XCTest
 
 actor StubTransport: JiraTransport {
     private var requests: [URLRequest] = []
+    private var responseIndex = 0
     let responses: [(Int, Data)]
 
     init(_ responses: [(Int, String)]) {
@@ -11,8 +12,12 @@ actor StubTransport: JiraTransport {
     }
 
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let index = requests.count
         requests.append(request)
+        if request.url?.lastPathComponent == "remotelink" {
+            return (Data("[]".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let index = responseIndex
+        responseIndex += 1
         let (status, data) = responses[index]
         return (data, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
     }

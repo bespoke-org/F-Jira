@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-struct TokenStore {
+struct TokenStore: Sendable {
     private let service = "dev.fjira.app.jira-token"
 
     func load(site: String, account: String) throws -> String? {

@@ -4,6 +4,13 @@ public struct JiraProject: Codable, Identifiable, Sendable {
     public let id: String
     public let key: String
     public let name: String
+    public let avatarUrls: [String: URL]?
+
+    public var avatarURL: URL? {
+        guard let avatarUrls else { return nil }
+        return avatarUrls["48x48"] ?? avatarUrls["32x32"] ?? avatarUrls["24x24"]
+            ?? avatarUrls["16x16"] ?? avatarUrls.sorted { $0.key < $1.key }.first?.value
+    }
 }
 
 public struct CachedProjects: Codable, Sendable {

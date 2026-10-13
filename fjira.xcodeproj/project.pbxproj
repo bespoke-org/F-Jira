@@ -33,7 +33,7 @@
             dependencies = ();
             fileSystemSynchronizedGroups = (A00000000000000000000004);
             name = fjira;
-            packageProductDependencies = (A00000000000000000000011);
+            packageProductDependencies = (A00000000000000000000011, A00000000000000000000013);
             productName = fjira;
             productReference = A0000000000000000000000A;
             productType = "com.apple.product-type.application";
@@ -63,7 +63,7 @@
         A00000000000000000000007 = {
             isa = PBXFrameworksBuildPhase;
             buildActionMask = 2147483647;
-            files = (A00000000000000000000012);
+            files = (A00000000000000000000012, A00000000000000000000014);
             runOnlyForDeploymentPostprocessing = 0;
         };
         A00000000000000000000008 = {
@@ -152,6 +152,14 @@
         A00000000000000000000012 = {
             isa = PBXBuildFile;
             productRef = A00000000000000000000011;
+        };
+        A00000000000000000000013 = {
+            isa = XCSwiftPackageProductDependency;
+            productName = FjiraUI;
+        };
+        A00000000000000000000014 = {
+            isa = PBXBuildFile;
+            productRef = A00000000000000000000013;
         };
     };
     rootObject = A00000000000000000000001;

@@ -1,12 +1,18 @@
 import AppKit
 import FjiraCore
+import FjiraUI
 import SwiftUI
 
 struct BrowserView: View {
     @Bindable var model: BrowserModel
     let showAccount: () -> Void
     @State private var projectFilter = ""
+    @State private var showingProjects = false
+    @State private var selectedView: BrowserSection? = .issues
+
+    private enum BrowserSection: Hashable { case issues }
     @State private var selectedIssueID: String?
+    @State private var availableDetailWidth: CGFloat = 0
     @State private var sortOrder: [KeyPathComparator<JiraIssue>] = []
 
     private var filteredProjects: [JiraProject] {
@@ -20,70 +26,168 @@ struct BrowserView: View {
 
     var body: some View {
         NavigationSplitView {
-            VStack(spacing: 0) {
-                TextField("Filter projects", text: $projectFilter)
-                    .textFieldStyle(.roundedBorder)
-                    .padding(12)
-                List(selection: Binding(get: { model.selectedProjectID }, set: { model.selectProject($0) })) {
-                    ForEach(filteredProjects) { project in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(project.key).font(.headline)
-                            Text(project.name).font(.caption).foregroundStyle(.secondary)
-                        }
-                        .tag(project.id)
-                    }
-                }
-                .disabled(model.isRestoring)
-                if model.projects.isEmpty {
-                    Text(model.isLoadingProjects ? "Loading projects…" : "No downloaded projects")
-                        .font(.caption).foregroundStyle(.secondary).padding()
-                }
-                Divider()
-                VStack(alignment: .leading, spacing: 8) {
-                    if let message = model.projectError {
-                        Text(message).font(.caption).foregroundStyle(.red)
-                    }
-                    if let date = model.projectsFetchedAt {
-                        Text("Projects updated \(date.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Button("Refresh projects", systemImage: "arrow.clockwise") { model.refreshProjects() }
-                            .disabled(model.isLoadingProjects)
-                        if model.isLoadingProjects { ProgressView().controlSize(.small) }
-                    }
-                }
-                .padding(12)
+            List(selection: $selectedView) {
+                Label("Issues", systemImage: "list.bullet.rectangle")
+                    .tag(BrowserSection.issues)
             }
-            .navigationTitle("Projects")
-            .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 160, ideal: 200, max: 280)
         } detail: {
             if model.isRestoring {
                 ProgressView("Opening downloaded data…")
-            } else if let project = model.selectedProject {
-                issueList(project)
+            } else if model.selectedProject != nil {
+                GeometryReader { geometry in
+                    let wide = geometry.size.width >= 940
+                    HSplitView {
+                        issueList.frame(minWidth: wide ? 500 : 0)
+                        if wide && model.issueReader.selection != nil {
+                            IssueDetailView(reader: model.issueReader, site: model.connection.site, close: closeIssue)
+                                .frame(minWidth: 380, idealWidth: 440, maxWidth: 600)
+                        }
+                    }
+                    .onChange(of: geometry.size.width, initial: true) { _, width in availableDetailWidth = width }
+                    .sheet(isPresented: Binding(
+                        get: { availableDetailWidth < 940 && model.issueReader.selection != nil },
+                        set: { presented in if !presented && availableDetailWidth < 940 { closeIssue() } }
+                    )) {
+                        IssueDetailView(reader: model.issueReader, site: model.connection.site, close: closeIssue)
+                            .frame(minWidth: 560, idealWidth: 620, minHeight: 500, idealHeight: 700)
+                    }
+                }
             } else {
-                ContentUnavailableView("Select a project", systemImage: "folder", description: Text("Choose a project to browse its issues using JQL."))
+                ContentUnavailableView("Select a project", systemImage: "folder", description: Text("Choose a project from the top bar to browse its issues using JQL."))
             }
         }
+        .navigationTitle("")
         .toolbar {
-            ToolbarItem {
-                Button(model.connection.user.displayName, systemImage: "person.crop.circle", action: showAccount)
+            ToolbarItem(placement: .navigation) {
+                Button { showingProjects.toggle() } label: {
+                    HStack(spacing: 8) {
+                        projectImage(model.selectedProject, size: 24)
+                        Text(model.selectedProject?.name ?? "Select a project")
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .help("Change project")
+                .accessibilityLabel("\(model.selectedProject?.name ?? "Select a project"), change project")
+                .popover(isPresented: $showingProjects, arrowEdge: .bottom) { projectPicker }
+                .task(id: model.selectedProject?.avatarURL) {
+                    if let project = model.selectedProject { model.loadProjectAvatar(project) }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: showAccount) {
+                    HStack(spacing: 8) {
+                        Text(model.connection.user.displayName)
+                        if let data = model.accountAvatar?.data, let image = NSImage(data: data) {
+                            Image(nsImage: image)
+                                .resizable().scaledToFill()
+                                .frame(width: 24, height: 24).clipShape(Circle())
+                        } else {
+                            Image(systemName: "person.crop.circle")
+                                .font(.system(size: 24)).frame(width: 24, height: 24)
+                        }
+                    }
+                }
+                .help("Account")
+                .accessibilityLabel("\(model.connection.user.displayName), account")
             }
         }
         .task { await model.restore() }
-        .onChange(of: model.selectedProjectID) { _, _ in selectedIssueID = nil; sortOrder = [] }
-        .onChange(of: model.search?.query) { _, _ in selectedIssueID = nil; sortOrder = [] }
+        .onChange(of: selectedIssueID) { _, _ in
+            if let selectedIssue { model.issueReader.open(selectedIssue) }
+            else { model.issueReader.close() }
+        }
+        .onChange(of: model.selectedProjectID) { _, _ in closeIssue(); sortOrder = [] }
+        .onChange(of: model.search?.query) { _, _ in closeIssue(); sortOrder = [] }
     }
 
-    private func issueList(_ project: JiraProject) -> some View {
+    @ViewBuilder
+    private func projectImage(_ project: JiraProject?, size: CGFloat) -> some View {
+        if let url = project?.avatarURL, let data = model.projectAvatars[url]?.data,
+           let image = NSImage(data: data) {
+            Image(nsImage: image)
+                .resizable().scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size / 5))
+                .accessibilityHidden(true)
+        } else {
+            Image(systemName: "folder.fill")
+                .font(.system(size: size * 0.8))
+                .foregroundStyle(.secondary)
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var projectPicker: some View {
+        VStack(spacing: 0) {
+            TextField("Search projects", text: $projectFilter)
+                .textFieldStyle(.roundedBorder)
+                .padding(12)
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(filteredProjects) { project in
+                        Button {
+                            if model.selectedProjectID != project.id { model.selectProject(project.id) }
+                            showingProjects = false
+                        } label: {
+                            HStack(spacing: 10) {
+                                projectImage(project, size: 32)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(project.name).lineLimit(1)
+                                    Text(project.key).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if model.selectedProjectID == project.id {
+                                    Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                                }
+                            }
+                            .padding(8)
+                            .contentShape(Rectangle())
+                            .background(model.selectedProjectID == project.id ? Color.accentColor.opacity(0.1) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(model.isRestoring)
+                        .onAppear { model.loadProjectAvatar(project) }
+                    }
+                    if filteredProjects.isEmpty {
+                        Text(model.isLoadingProjects ? "Loading projects…" : "No matching projects")
+                            .foregroundStyle(.secondary).padding()
+                    }
+                }
+                .padding(.horizontal, 8)
+            }
+            Divider()
+            VStack(alignment: .leading, spacing: 8) {
+                if let message = model.projectError {
+                    Text(message).font(.caption).foregroundStyle(.red)
+                }
+                HStack {
+                    Button("Refresh projects", systemImage: "arrow.clockwise") { model.refreshProjects() }
+                        .disabled(model.isLoadingProjects)
+                    Spacer()
+                    if model.isLoadingProjects { ProgressView().controlSize(.small) }
+                }
+                if let date = model.projectsFetchedAt {
+                    Text("Updated \(date.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(12)
+        }
+        .frame(width: 360, height: 420)
+        .onDisappear { projectFilter = "" }
+    }
+
+    private var issueList: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(project.name).font(.title2.bold())
-                        Text("Project: \(project.key)").font(.caption).foregroundStyle(.secondary)
-                    }
+                    Text("Issues").font(.title2.bold())
                     Spacer()
                     Menu("Downloaded searches", systemImage: "clock") {
                         ForEach(model.history, id: \.query) { saved in
@@ -108,8 +212,6 @@ struct BrowserView: View {
                         Button("Cancel") { model.cancelSearch() }
                     }
                 }
-                Text("The selected project is always included. Leave the filter empty to show all its issues.")
-                    .font(.caption).foregroundStyle(.secondary)
                 if let message = model.errorMessage {
                     Label(message, systemImage: "exclamationmark.circle")
                         .font(.callout).foregroundStyle(.red).textSelection(.enabled)
@@ -177,7 +279,11 @@ struct BrowserView: View {
             .padding(12)
             .help("Column sorting applies to downloaded rows. Use ORDER BY in JQL to sort the entire search.")
         }
-        .navigationTitle(project.key)
+    }
+
+    private func closeIssue() {
+        selectedIssueID = nil
+        model.issueReader.close()
     }
 
     private func openSelectedIssue() {

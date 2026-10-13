@@ -1,0 +1,233 @@
+import AppKit
+@testable import FjiraCore
+import FjiraUI
+import SwiftUI
+import Observation
+import WebKit
+import XCTest
+
+@MainActor
+final class IssueViewportTests: XCTestCase {
+    func testLongCommentsStayInScrollableViewport() async throws {
+        _ = NSApplication.shared
+        let lines = (0..<40).map { "<p>Comment line \($0)</p>" }.joined()
+        let object: [String: Any] = ["id":"100", "key":"EX-1", "fields": [
+            "summary":"Fixture", "components": [["name":"Engine"], ["name":"API"]],
+            "comment": ["comments": [["id":"c1", "body":"Comment", "author":["displayName":"Tester", "name":"tester"]]]]
+        ], "renderedFields": ["description":"<p>Description</p>", "comment": ["comments": [["id":"c1", "body":lines]]]]]
+        let transport = FixtureTransport(data: try JSONSerialization.data(withJSONObject: object))
+        let site = try JiraSite("https://jira.example.com")
+        let client = JiraClient(transport: transport)
+        let detail = try await client.issue(site: site, token: "fixture-token", id: "100")
+        let cache = try ConnectionCache(path: ":memory:")
+        try await cache.saveIssue(detail, site: site.identifier, account: "fixture")
+        let reader = IssueReader(site: site, account: "fixture", cache: cache, client: client, token: { "fixture-token" })
+        reader.open(detail.issue.listIssue)
+        await reader.currentTask?.value
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: IssueDetailView(reader: reader, site: site, close: {}))
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.contentView = nil; window.close(); reader.close() }
+        var web: WKWebView?
+        for _ in 0..<150 {
+            host.layoutSubtreeIfNeeded()
+            web = findWebView(host)
+            if let web, let text = try? await evaluate(web, "document.body.textContent"), text.contains("Tester") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let content = try XCTUnwrap(web)
+        try await Task.sleep(for: .milliseconds(100))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertLessThanOrEqual(content.frame.height, 300, "The web view must stay inside the issue viewport")
+        let scrollable = try await evaluate(content, "String(document.documentElement.scrollHeight > window.innerHeight)")
+        XCTAssertEqual(scrollable, "true", "Long comments must scroll inside the bounded viewport")
+        _ = try await evaluate(content, "window.scrollTo(0, document.documentElement.scrollHeight); 'done'")
+        let scrolled = try await evaluate(content, "String(window.scrollY > 0)")
+        XCTAssertEqual(scrolled, "true", "Comments below the fold must be reachable")
+        let author = try await evaluate(content, "document.querySelector('.author-name')?.textContent ?? ''")
+        XCTAssertEqual(author, "Tester")
+        let avatar = try await evaluate(content, "String(document.querySelector('.avatar')?.getBoundingClientRect().width ?? 0)")
+        XCTAssertEqual(avatar, "36")
+        let components = try await evaluate(content, "String(document.querySelectorAll('.chip').length)")
+        XCTAssertEqual(components, "2")
+    }
+
+    func testCachedIssueRendersWhileCredentialsAreSlow() async throws {
+        _ = NSApplication.shared
+        let object: [String: Any] = ["id": "100", "key": "EX-1", "fields": [
+            "summary": "Cached issue", "description": "Cached description before refresh"
+        ]]
+        let site = try JiraSite("https://jira.example.com")
+        let client = JiraClient(transport: FixtureTransport(data: try JSONSerialization.data(withJSONObject: object)))
+        let detail = try await client.issue(site: site, token: "fixture-token", id: "100")
+        let cache = try ConnectionCache(path: ":memory:")
+        try await cache.saveIssue(detail, site: site.identifier, account: "fixture")
+        let reader = IssueReader(site: site, account: "fixture", cache: cache, client: client,
+                                 token: { slowFixtureCredential() })
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: IssueDetailView(reader: reader, site: site, close: {}))
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.contentView = nil; window.close(); reader.close() }
+        reader.open(detail.issue.listIssue)
+        let started = ContinuousClock.now
+        var cachedTextVisible = false
+        while started.duration(to: .now) < .seconds(1) {
+            host.layoutSubtreeIfNeeded()
+            if let web = findWebView(host),
+               let text = try? await evaluate(web, "document.body.textContent"),
+               text.contains("Cached description before refresh") {
+                cachedTextVisible = true
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(cachedTextVisible, "Cached details must render without waiting for credential lookup")
+        XCTAssertLessThan(started.duration(to: .now), .seconds(1))
+        XCTAssertTrue(reader.isLoading, "Cached details must be visible while refresh is still pending")
+        await reader.currentTask?.value
+    }
+
+    func testSwitchingIssuesKeepsViewportAndResetsScrollWithoutNavigation() async throws {
+        _ = NSApplication.shared
+        let lines = (0..<40).map { "Line \($0)" }.joined(separator: "\n\n")
+        let firstJSON = try JSONSerialization.data(withJSONObject: [
+            "id": "100", "key": "EX-1", "fields": ["summary": "First issue", "description": "First body\n\n" + lines]
+        ])
+        let secondJSON = try JSONSerialization.data(withJSONObject: [
+            "id": "200", "key": "EX-2", "fields": ["summary": "Second issue", "description": "Second body\n\n" + lines]
+        ])
+        let site = try JiraSite("https://jira.example.com")
+        let client = JiraClient(transport: SwitchingFixtureTransport(first: firstJSON, second: secondJSON))
+        let cache = try ConnectionCache(path: ":memory:")
+        let first = try await client.issue(site: site, token: "fixture-token", id: "100")
+        let second = try await client.issue(site: site, token: "fixture-token", id: "200")
+        try await cache.saveIssue(first, site: site.identifier, account: "fixture")
+        try await cache.saveIssue(second, site: site.identifier, account: "fixture")
+        let reader = IssueReader(site: site, account: "fixture", cache: cache, client: client, token: { "fixture-token" })
+        reader.open(first.issue.listIssue)
+        await reader.currentTask?.value
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: IssueDetailView(reader: reader, site: site, close: {}))
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.contentView = nil; window.close(); reader.close() }
+        var original: WKWebView?
+        for _ in 0..<150 {
+            host.layoutSubtreeIfNeeded()
+            original = findWebView(host)
+            if let original, let text = try? await evaluate(original, "document.body.textContent"), text.contains("First body") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let originalWeb = try XCTUnwrap(original)
+        _ = try await evaluate(originalWeb, "window.viewportMarker = 'same page'; window.scrollTo(0, 200); 'done'")
+        reader.open(second.issue.listIssue)
+        await reader.currentTask?.value
+        var switched: WKWebView?
+        for _ in 0..<150 {
+            host.layoutSubtreeIfNeeded()
+            switched = findWebView(host)
+            if let switched, let text = try? await evaluate(switched, "document.body.textContent"), text.contains("Second body") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let switchedWeb = try XCTUnwrap(switched)
+        XCTAssertTrue(switchedWeb === originalWeb, "Switching issues must keep the existing viewport")
+        let marker = try await evaluate(switchedWeb, "window.viewportMarker ?? ''")
+        XCTAssertEqual(marker, "same page", "Replacing an issue must not navigate through an empty page")
+        let position = try await evaluate(switchedWeb, "String(window.scrollY)")
+        XCTAssertEqual(position, "0", "A different issue starts at the top")
+        let text = try await evaluate(switchedWeb, "document.body.textContent")
+        XCTAssertTrue(text.contains("Second body"))
+        XCTAssertFalse(text.contains("First body"))
+    }
+
+    func testDocumentUpdatesPreserveScrollPosition() async throws {
+        _ = NSApplication.shared
+        let paragraphs = (0..<50).map { "<p>Line \($0)</p>" }.joined()
+        let state = DocumentState(document: "<html><body><p>Initial</p>\(paragraphs)</body></html>")
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 250),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: DocumentHarness(state: state))
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.contentView = nil; window.close() }
+        var web: WKWebView?
+        for _ in 0..<150 {
+            host.layoutSubtreeIfNeeded()
+            web = findWebView(host)
+            if let web, let text = try? await evaluate(web, "document.body.textContent"), text.contains("Initial") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let content = try XCTUnwrap(web)
+        _ = try await evaluate(content, "window.scrollTo(0, 350); 'done'")
+        state.document = state.document.replacingOccurrences(of: "Initial", with: "Updated")
+        var position = "0"
+        for _ in 0..<150 {
+            if let text = try? await evaluate(content, "document.body.textContent"), text.contains("Updated") {
+                position = try await evaluate(content, "String(window.scrollY)")
+                if position == "350" { break }
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(position, "350", "Avatar and comment updates must not jump to the top")
+    }
+
+    private func findWebView(_ view: NSView) -> WKWebView? {
+        if let web = view as? WKWebView { return web }
+        return view.subviews.lazy.compactMap { self.findWebView($0) }.first
+    }
+
+    private func evaluate(_ web: WKWebView, _ script: String) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            web.evaluateJavaScript(script, in: nil, in: .defaultClient) { result in
+                switch result {
+                case .success(let value): continuation.resume(returning: value as? String ?? "")
+                case .failure(let error): continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+}
+
+private struct FixtureTransport: JiraTransport {
+    let data: Data
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let response = request.url?.lastPathComponent == "remotelink" ? Data("[]".utf8) : data
+        return (response, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
+@MainActor
+@Observable
+private final class DocumentState {
+    var document: String
+    init(document: String) { self.document = document }
+}
+
+private struct DocumentHarness: View {
+    @Bindable var state: DocumentState
+    var body: some View { RenderedIssueBody(document: state.document).frame(maxWidth: .infinity, maxHeight: .infinity) }
+}
+
+private func slowFixtureCredential() -> String {
+    Thread.sleep(forTimeInterval: 2)
+    return "fixture-token"
+}
+
+private struct SwitchingFixtureTransport: JiraTransport {
+    let first: Data
+    let second: Data
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let data = request.url?.lastPathComponent == "remotelink" ? Data("[]".utf8)
+            : request.url?.lastPathComponent == "200" ? second : first
+        return (data, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}

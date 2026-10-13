@@ -1,3 +1,4 @@
+import AppKit
 import FjiraCore
 import SwiftUI
 
@@ -28,7 +29,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 900, minHeight: 540)
+        .frame(minWidth: 760, minHeight: 540)
         .background(Color(nsColor: .windowBackgroundColor))
         .task { await model.restore() }
         .task(id: connectionIdentity) {
@@ -92,8 +93,19 @@ struct ContentView: View {
 
     private func accountView(_ connection: CachedConnection) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            Label(connection.user.displayName, systemImage: "person.crop.circle")
-                .font(.largeTitle.bold())
+            HStack(spacing: 16) {
+                if let data = browser?.accountAvatar?.data, let image = NSImage(data: data) {
+                    Image(nsImage: image)
+                        .resizable().scaledToFill()
+                        .frame(width: 64, height: 64).clipShape(Circle())
+                } else {
+                    Image(systemName: "person.crop.circle")
+                        .font(.system(size: 64)).frame(width: 64, height: 64)
+                        .foregroundStyle(.secondary)
+                }
+                Text(connection.user.displayName)
+                    .font(.largeTitle.bold())
+            }
             Text(connection.site.identifier)
                 .textSelection(.enabled)
                 .foregroundStyle(.secondary)
@@ -118,10 +130,10 @@ struct ContentView: View {
                     Button("Cancel") { model.cancel() }
                 }
                 Spacer()
-                Button("Disconnect", role: .destructive) { model.disconnect() }
+                Button("Log out", role: .destructive) { model.disconnect() }
                     .disabled(model.isBusy)
             }
-            Text("Disconnect removes the saved token. Downloaded data stays on this Mac.")
+            Text("Logging out removes the saved token. Downloaded data stays on this Mac.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
