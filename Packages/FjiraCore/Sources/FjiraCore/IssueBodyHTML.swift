@@ -23,6 +23,10 @@ public enum IssueBodyHTML {
         }.joined(separator: "\n")
         let background = dark ? "#1e1e1e" : "#ffffff"
         let foreground = dark ? "#eeeeee" : "#222222"
+        let statusStyles: String = JiraStatusTone.allCases.map { tone -> String in
+            let palette = tone.palette(dark: dark)
+            return ".status-\(tone.rawValue) { color: \(palette.foregroundCSS); background: \(palette.backgroundCSS); }"
+        }.joined(separator: "\n")
         return """
             <!doctype html><html><head><meta charset="utf-8">
             <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none';">
@@ -33,6 +37,9 @@ public enum IssueBodyHTML {
             h1 { font-size: 20px; line-height: 1.3; margin: 0 0 18px; }
             .metadata { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 7px 14px; margin-bottom: 14px; }
             hr { border: 0; border-top: 1px solid rgba(128,128,128,.3); margin: 18px 0; }
+            .status-pill { display: inline-flex; align-items: center; max-width: 100%; box-sizing: border-box; padding: 3px 8px; border-radius: 5px; font-size: 12px; font-weight: 500; line-height: 16px; }
+            .status-pill > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            \(statusStyles)
             .metadata dt { opacity: .65; } .metadata dd { margin: 0; }
             .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
             .tag-label { padding-top: 2px; }
@@ -83,7 +90,7 @@ public enum IssueBodyHTML {
         let issue = detail.issue.listIssue
         let fields = detail.issue.fields
         var rows = [
-            ("Status", escape(issue.status)),
+            ("Status", "<span class=\"status-pill status-\(issue.statusTone.rawValue)\" title=\"\(escape(issue.status))\"><span>\(escape(issue.status))</span></span>"),
             ("Type", iconValue(issue.issueType, url: fields.issuetype?.iconUrl, images: images)),
             ("Assignee", personValue(fields.assignee, fallback: "Unassigned", images: images)),
             ("Priority", iconValue(issue.priority, url: fields.priority?.iconUrl, images: images))

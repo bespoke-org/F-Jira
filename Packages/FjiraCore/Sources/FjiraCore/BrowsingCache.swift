@@ -32,7 +32,7 @@ extension ConnectionCache {
             try Data.fetchAll(db,
                 sql: "SELECT snapshot FROM search_snapshot WHERE site = ? AND account = ? AND project = ?",
                 arguments: [site, account, project])
-                .map { try JSONDecoder().decode(CachedSearch.self, from: $0) }
+                .map { try JSONDecoder().decode(CachedSearch.self, from: $0).restoringStatusCategories }
                 .sorted { $0.fetchedAt > $1.fetchedAt }
         }
     }
@@ -106,6 +106,6 @@ extension ConnectionCache {
         guard let data = try Data.fetchOne(db,
             sql: "SELECT snapshot FROM search_snapshot WHERE site = ? AND account = ? AND project = ? AND input = ?",
             arguments: [site, account, query.projectID, query.input]) else { return nil }
-        return try JSONDecoder().decode(CachedSearch.self, from: data)
+        return try JSONDecoder().decode(CachedSearch.self, from: data).restoringStatusCategories
     }
 }

@@ -68,13 +68,15 @@ extension ConnectionCache {
             sql: "SELECT payload FROM response_cache WHERE site = ? AND account = ? AND resource = ?",
             arguments: [site, account, "issue-detail:\(id)"]) else { return nil }
         let saved = try JSONDecoder().decode(CachedIssueDetail.self, from: data)
-        // Older projections omitted icon URLs, but the original full response kept them.
+        // Older projections omitted icon URLs and status categories, but the full response kept them.
         // Recover the immutable issue fields without losing cached pages or remote links.
-        guard saved.issue.fields.issuetype?.iconUrl == nil || saved.issue.fields.priority?.iconUrl == nil,
+        guard saved.issue.fields.issuetype?.iconUrl == nil || saved.issue.fields.priority?.iconUrl == nil
+                || saved.issue.fields.status?.statusCategory == nil,
               let original = try? JSONDecoder().decode(JiraIssueDetail.self, from: saved.response),
               original.id == saved.issue.id, original.key == saved.issue.key,
               (saved.issue.fields.issuetype?.iconUrl == nil && original.fields.issuetype?.iconUrl != nil)
-                || (saved.issue.fields.priority?.iconUrl == nil && original.fields.priority?.iconUrl != nil) else { return saved }
+                || (saved.issue.fields.priority?.iconUrl == nil && original.fields.priority?.iconUrl != nil)
+                || (saved.issue.fields.status?.statusCategory == nil && original.fields.status?.statusCategory != nil) else { return saved }
         var recovered = CachedIssueDetail(issue: original, response: saved.response, fetchedAt: saved.fetchedAt,
                                           generation: saved.generation, commentPages: saved.commentPages,
                                           previousComments: saved.previousComments)

@@ -233,7 +233,9 @@ struct BrowserView: View {
                 TableColumn("Summary", value: \.summary) { issue in
                     Text(issue.summary).help(issue.summary)
                 }.width(min: 220, ideal: 380)
-                TableColumn("Status", value: \.status).width(min: 90, ideal: 120)
+                TableColumn("Status", value: \.status) { issue in
+                    StatusPill(name: issue.status, tone: issue.statusTone)
+                }.width(min: 100, ideal: 140)
                 TableColumn("Assignee", value: \.assignee).width(min: 110, ideal: 150)
                 TableColumn("Priority", value: \.priority).width(min: 75, ideal: 90)
                 TableColumn("Updated", value: \.updated) { issue in

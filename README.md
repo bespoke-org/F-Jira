@@ -50,6 +50,10 @@ Use the close button to return to the list.
 
 The viewer includes metadata, formatted description and comments, labels,
 components, fix versions, subtasks, issue links, and attachment metadata.
+Statuses use tinted pills in the table and issue metadata: gray for To Do/unknown,
+blue for In Progress, and green for Done, based on Jira's status category. The
+status name stays visible, with matching light and dark palettes. Older cached
+searches and details recover categories from their saved responses without a refresh.
 **Issue Links** combines related Jira issues with external links, including merge
 requests, loaded from Jira's read-only `/rest/api/2/issue/{id}/remotelink` endpoint.
 External links open in your browser. Their complete responses are cached for offline

@@ -104,10 +104,12 @@ public struct JiraIssue: Codable, Identifiable, Sendable {
         public let name: String
         public let id: String?
         public let iconUrl: URL?
+        public let statusCategory: JiraStatusCategory?
     }
 
     public var summary: String { fields.summary ?? "" }
     public var status: String { fields.status?.name ?? "—" }
+    public var statusTone: JiraStatusTone { fields.status?.statusCategory?.tone ?? .neutral }
     public var assignee: String { fields.assignee?.displayName ?? "Unassigned" }
     public var priority: String { fields.priority?.name ?? "—" }
     public var issueType: String { fields.issuetype?.name ?? "—" }
@@ -137,6 +139,20 @@ public struct CachedSearch: Codable, Sendable {
     public let query: ProjectQuery
     public let generation: UUID
     public var pages: [CachedIssuePage]
+
+    var restoringStatusCategories: CachedSearch {
+        var restored = self
+        restored.pages = pages.map { cached in
+            guard cached.page.issues.contains(where: { $0.fields.status?.statusCategory == nil }),
+                  let original = try? JSONDecoder().decode(IssuePage.self, from: cached.response),
+                  original.startAt == cached.page.startAt,
+                  original.issues.map(\.id) == cached.page.issues.map(\.id),
+                  original.issues.map(\.key) == cached.page.issues.map(\.key),
+                  original.issues.contains(where: { $0.fields.status?.statusCategory != nil }) else { return cached }
+            return CachedIssuePage(page: original, response: cached.response, fetchedAt: cached.fetchedAt)
+        }
+        return restored
+    }
 
     public var issues: [JiraIssue] {
         var seen = Set<String>()
