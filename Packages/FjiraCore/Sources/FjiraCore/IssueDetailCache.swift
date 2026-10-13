@@ -21,6 +21,31 @@ extension ConnectionCache {
         try database.read { db in try Self.readDetail(in: db, site: site, account: account, id: id) }
     }
 
+    func loadIssuePresentation(site: String, account: String, id: String) throws
+        -> (detail: CachedIssueDetail, images: [String: CachedAvatar])? {
+        try database.read { db in
+            guard let detail = try Self.readDetail(in: db, site: site, account: account, id: id) else { return nil }
+            let urls = detail.imageURLs
+            var images: [String: CachedAvatar] = [:]
+            for offset in stride(from: 0, to: urls.count, by: 200) {
+                let resources = urls[offset..<min(offset + 200, urls.count)].map { "avatar:\($0.absoluteString)" }
+                let placeholders = Array(repeating: "?", count: resources.count).joined(separator: ",")
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT resource, payload FROM response_cache
+                    WHERE site = ? AND account = ? AND resource IN (\(placeholders))
+                    """, arguments: StatementArguments([site, account] + resources))
+                for row in rows {
+                    let resource: String = row["resource"]
+                    let data: Data = row["payload"]
+                    if let image = try? JSONDecoder().decode(CachedAvatar.self, from: data) {
+                        images[String(resource.dropFirst("avatar:".count))] = image
+                    }
+                }
+            }
+            return (detail, images)
+        }
+    }
+
     public func saveComments(
         _ page: CachedCommentPage, site: String, account: String, id: String, expectedGeneration: UUID
     ) throws {
@@ -42,7 +67,19 @@ extension ConnectionCache {
         guard let data = try Data.fetchOne(db,
             sql: "SELECT payload FROM response_cache WHERE site = ? AND account = ? AND resource = ?",
             arguments: [site, account, "issue-detail:\(id)"]) else { return nil }
-        return try JSONDecoder().decode(CachedIssueDetail.self, from: data)
+        let saved = try JSONDecoder().decode(CachedIssueDetail.self, from: data)
+        // Older projections omitted icon URLs, but the original full response kept them.
+        // Recover the immutable issue fields without losing cached pages or remote links.
+        guard saved.issue.fields.issuetype?.iconUrl == nil || saved.issue.fields.priority?.iconUrl == nil,
+              let original = try? JSONDecoder().decode(JiraIssueDetail.self, from: saved.response),
+              original.id == saved.issue.id, original.key == saved.issue.key,
+              (saved.issue.fields.issuetype?.iconUrl == nil && original.fields.issuetype?.iconUrl != nil)
+                || (saved.issue.fields.priority?.iconUrl == nil && original.fields.priority?.iconUrl != nil) else { return saved }
+        var recovered = CachedIssueDetail(issue: original, response: saved.response, fetchedAt: saved.fetchedAt,
+                                          generation: saved.generation, commentPages: saved.commentPages,
+                                          previousComments: saved.previousComments)
+        recovered.remoteLinks = saved.remoteLinks
+        return recovered
     }
 
     static func writeDetail(_ detail: CachedIssueDetail, in db: Database, site: String, account: String) throws {

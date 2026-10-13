@@ -123,6 +123,14 @@ public struct CachedIssueDetail: Codable, Sendable {
     public var previousComments: [JiraComment]
     public var remoteLinks: CachedRemoteIssueLinks? = nil
 
+    var imageURLs: [URL] {
+        let fields = issue.fields
+        let metadata = [fields.issuetype?.iconUrl, fields.priority?.iconUrl,
+                        fields.assignee?.avatarURL, fields.reporter?.avatarURL].compactMap { $0 }
+        var seen = Set<URL>()
+        return (metadata + comments.compactMap { $0.author?.avatarURL }).filter { seen.insert($0).inserted }
+    }
+
     public var currentComments: [JiraComment] {
         var seen = Set<String>()
         return ((issue.fields.comment?.comments ?? []) + commentPages.flatMap(\.page.comments))

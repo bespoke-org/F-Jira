@@ -13,6 +13,10 @@ final class IssueViewportTests: XCTestCase {
         let lines = (0..<40).map { "<p>Comment line \($0)</p>" }.joined()
         let object: [String: Any] = ["id":"100", "key":"EX-1", "fields": [
             "summary":"Fixture", "components": [["name":"Engine"], ["name":"API"]],
+            "assignee": ["name": "alice", "displayName": "Alice Assignee", "avatarUrls": ["48x48": "https://jira.example.com/avatar/alice.png"]],
+            "reporter": ["name": "bob", "displayName": "Bob Reporter", "avatarUrls": ["48x48": "https://jira.example.com/avatar/bob.png"]],
+            "issuetype": ["name": "Task", "iconUrl": "https://jira.example.com/icons/task.svg"],
+            "priority": ["name": "High", "iconUrl": "https://jira.example.com/icons/high.svg"],
             "comment": ["comments": [["id":"c1", "body":"Comment", "author":["displayName":"Tester", "name":"tester"]]]]
         ], "renderedFields": ["description":"<p>Description</p>", "comment": ["comments": [["id":"c1", "body":lines]]]]]
         let transport = FixtureTransport(data: try JSONSerialization.data(withJSONObject: object))
@@ -21,9 +25,18 @@ final class IssueViewportTests: XCTestCase {
         let detail = try await client.issue(site: site, token: "fixture-token", id: "100")
         let cache = try ConnectionCache(path: ":memory:")
         try await cache.saveIssue(detail, site: site.identifier, account: "fixture")
+        let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aGLsAAAAASUVORK5CYII=")!
+        let svg = Data(##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path fill="#2684ff" d="M2 2h12v12H2z"/></svg>"##.utf8)
+        for path in ["avatar/alice.png", "avatar/bob.png", "icons/task.svg", "icons/high.svg"] {
+            let vector = path.hasSuffix("svg")
+            try await cache.saveAvatar(CachedAvatar(data: vector ? svg : png, mimeType: vector ? "image/svg+xml" : "image/png", fetchedAt: Date()),
+                                       site: site.identifier, account: "fixture", url: site.url.appending(path: path))
+        }
+
         let reader = IssueReader(site: site, account: "fixture", cache: cache, client: client, token: { "fixture-token" })
         reader.open(detail.issue.listIssue)
         await reader.currentTask?.value
+        await reader.avatarTask?.value
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -49,10 +62,19 @@ final class IssueViewportTests: XCTestCase {
         XCTAssertEqual(scrolled, "true", "Comments below the fold must be reachable")
         let author = try await evaluate(content, "document.querySelector('.author-name')?.textContent ?? ''")
         XCTAssertEqual(author, "Tester")
-        let avatar = try await evaluate(content, "String(document.querySelector('.avatar')?.getBoundingClientRect().width ?? 0)")
+        let avatar = try await evaluate(content, "String(document.querySelector('.comment-header .avatar')?.getBoundingClientRect().width ?? 0)")
         XCTAssertEqual(avatar, "36")
         let components = try await evaluate(content, "String(document.querySelectorAll('.chip').length)")
         XCTAssertEqual(components, "2")
+        let metadata = try await evaluate(content, "String(document.querySelectorAll('.metadata img').length)")
+        XCTAssertEqual(metadata, "4")
+        let avatarSize = try await evaluate(content, "String(document.querySelector('.metadata-avatar')?.getBoundingClientRect().width ?? 0)")
+        XCTAssertEqual(avatarSize, "20")
+        let iconSize = try await evaluate(content, "String(document.querySelector('.metadata-icon')?.getBoundingClientRect().width ?? 0)")
+        XCTAssertEqual(iconSize, "16")
+        let vectorLoaded = try await evaluate(content, "String(document.querySelector('.metadata-icon')?.naturalWidth ?? 0)")
+        XCTAssertEqual(vectorLoaded, "16", "SVG Jira icons must actually render")
+
     }
 
     func testCachedIssueRendersWhileCredentialsAreSlow() async throws {

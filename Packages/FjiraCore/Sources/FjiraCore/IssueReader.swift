@@ -23,6 +23,10 @@ public final class IssueReader {
     @ObservationIgnored var remoteLinksTask: Task<Void, Never>?
     @ObservationIgnored private var recentIssues: [String: IssueSnapshot] = [:]
     @ObservationIgnored private var recentIssueOrder: [String] = []
+    @ObservationIgnored private var imageMemory: [String: CachedAvatar] = [:]
+    @ObservationIgnored private var recentImageURLs: [String] = []
+    @ObservationIgnored private var activeImageURLs: [URL] = []
+    @ObservationIgnored private var imageGeneration: UUID?
 
     private struct IssueSnapshot {
         let detail: CachedIssueDetail
@@ -43,8 +47,11 @@ public final class IssueReader {
         selection = issue
         isOffline = false
         let saved = recentIssues[issue.id]
+        rememberImages(saved?.avatars ?? [:])
+        let knownURLs = saved?.detail.imageURLs ?? [issue.fields.issuetype?.iconUrl, issue.fields.priority?.iconUrl,
+                                                    issue.fields.assignee?.avatarURL].compactMap { $0 }
+        avatars = imagesInMemory(for: knownURLs, cached: saved?.avatars ?? [:])
         detail = saved?.detail
-        avatars = saved?.avatars ?? [:]
         rememberCurrentIssue()
         refresh()
     }
@@ -70,11 +77,10 @@ public final class IssueReader {
             defer { if requestID == generation { isLoading = false; currentTask = nil } }
             do {
                 if detail == nil {
-                    let saved = try await cache.loadIssue(site: site.identifier, account: account, id: selection.id)
+                    let saved = try await cache.loadIssuePresentation(site: site.identifier, account: account, id: selection.id)
                     try Task.checkCancellation()
                     guard requestID == generation else { return }
-                    detail = saved
-                    rememberCurrentIssue()
+                    if let saved { present(saved.detail, images: saved.images) }
                 }
                 if let detail { loadAvatars(detail) }
                 let result = try await client.issue(site: site, token: credentials(), id: selection.id)
@@ -82,15 +88,14 @@ public final class IssueReader {
                 guard requestID == generation else { return }
                 guard result.issue.id == selection.id else { throw JiraError.invalidResponse }
                 try await cache.saveIssue(result, site: site.identifier, account: account)
-                let updated = try await cache.loadIssue(site: site.identifier, account: account, id: selection.id)
+                let updated = try await cache.loadIssuePresentation(site: site.identifier, account: account, id: selection.id)
                 try Task.checkCancellation()
                 guard requestID == generation else { return }
-                detail = updated
                 isOffline = false
-                rememberCurrentIssue()
                 if let updated {
-                    loadAvatars(updated)
-                    refreshRemoteLinks(updated, generation: generation)
+                    present(updated.detail, images: updated.images)
+                    loadAvatars(updated.detail)
+                    refreshRemoteLinks(updated.detail, generation: generation)
                 }
             } catch { handle(error, generation: generation) }
         }
@@ -110,15 +115,14 @@ public final class IssueReader {
                 guard requestID == generation else { return }
                 try await cache.saveComments(page, site: site.identifier, account: account,
                                              id: detail.issue.id, expectedGeneration: detail.generation)
-                let updated = try await cache.loadIssue(site: site.identifier, account: account, id: detail.issue.id)
+                let updated = try await cache.loadIssuePresentation(site: site.identifier, account: account, id: detail.issue.id)
                 try Task.checkCancellation()
                 guard requestID == generation else { return }
-                self.detail = updated
                 isOffline = false
-                rememberCurrentIssue()
                 if let updated {
-                    loadAvatars(updated)
-                    refreshRemoteLinks(updated, generation: generation)
+                    present(updated.detail, images: updated.images)
+                    loadAvatars(updated.detail)
+                    refreshRemoteLinks(updated.detail, generation: generation)
                 }
             } catch { handle(error, generation: generation) }
         }
@@ -148,26 +152,61 @@ public final class IssueReader {
         }
     }
 
-    private func loadAvatars(_ detail: CachedIssueDetail) {
-        avatarTask?.cancel()
-        let generation = requestID
-        let urls = Array(Set(detail.comments.compactMap { $0.author?.avatarURL })).sorted { $0.absoluteString < $1.absoluteString }
-        guard !urls.isEmpty else { return }
-        avatarTask = Task {
-            var missing: [URL] = []
-            for url in urls {
-                guard !Task.isCancelled, requestID == generation else { return }
-                if let saved = try? await cache.loadAvatar(site: site.identifier, account: account, url: url) {
-                    guard !Task.isCancelled, requestID == generation else { return }
-                    avatars[url.absoluteString] = saved
-                    rememberCurrentIssue()
-                    if Date().timeIntervalSince(saved.fetchedAt) > 86_400 { missing.append(url) }
-                } else { missing.append(url) }
+    private func present(_ detail: CachedIssueDetail, images: [String: CachedAvatar]) {
+        let combined = imagesInMemory(for: detail.imageURLs, cached: images)
+        rememberImages(combined)
+        // Publish the image bytes before the issue so its first render is complete.
+        avatars = combined
+        self.detail = detail
+        rememberCurrentIssue()
+    }
+
+    private func imagesInMemory(for urls: [URL], cached: [String: CachedAvatar] = [:]) -> [String: CachedAvatar] {
+        var result: [String: CachedAvatar] = [:]
+        for url in urls {
+            let key = url.absoluteString
+            if let memory = imageMemory[key], let saved = cached[key] {
+                result[key] = memory.fetchedAt > saved.fetchedAt ? memory : saved
+            } else {
+                result[key] = imageMemory[key] ?? cached[key]
             }
-            guard !missing.isEmpty, !Task.isCancelled, requestID == generation, let credential = try? await credentials() else { return }
+        }
+        return result
+    }
+
+    private func rememberImages(_ images: [String: CachedAvatar]) {
+        for (url, image) in images {
+            if let existing = imageMemory[url], existing.fetchedAt > image.fetchedAt { continue }
+            imageMemory[url] = image
+            recentImageURLs.removeAll { $0 == url }
+            recentImageURLs.append(url)
+            if recentImageURLs.count > 256 {
+                imageMemory.removeValue(forKey: recentImageURLs.removeFirst())
+            }
+        }
+    }
+
+    private func loadAvatars(_ detail: CachedIssueDetail) {
+        let generation = requestID
+        let urls = detail.imageURLs
+        // An issue refresh with the same URLs must not restart in-flight image requests.
+        if avatarTask != nil, imageGeneration == generation, activeImageURLs == urls { return }
+        avatarTask?.cancel()
+        let missing = urls.filter { url in
+            guard let image = avatars[url.absoluteString] else { return true }
+            return Date().timeIntervalSince(image.fetchedAt) > 86_400
+        }
+        guard !missing.isEmpty else { avatarTask = nil; return }
+        imageGeneration = generation
+        activeImageURLs = urls
+        avatarTask = Task {
+            defer {
+                if imageGeneration == generation, activeImageURLs == urls { avatarTask = nil }
+            }
+            guard !Task.isCancelled, requestID == generation, let credential = try? await credentials() else { return }
             for offset in stride(from: 0, to: missing.count, by: 4) {
                 let batch = Array(missing[offset..<min(offset + 4, missing.count)])
-                await withTaskGroup(of: (String, CachedAvatar?).self) { group in
+                let downloaded = await withTaskGroup(of: (String, CachedAvatar?).self, returning: [String: CachedAvatar].self) { group in
                     for url in batch {
                         group.addTask { [client, cache, site, account] in
                             guard !Task.isCancelled, let avatar = try? await client.avatar(site: site, token: credential, url: url) else {
@@ -178,14 +217,16 @@ public final class IssueReader {
                             return (url.absoluteString, avatar)
                         }
                     }
+                    var result: [String: CachedAvatar] = [:]
                     for await (url, avatar) in group {
-                        if !Task.isCancelled, requestID == generation, let avatar {
-                            avatars[url] = avatar
-                            rememberCurrentIssue()
-                        }
+                        if let avatar { result[url] = avatar }
                     }
+                    return result
                 }
-                if Task.isCancelled || requestID != generation { return }
+                guard !Task.isCancelled, requestID == generation else { return }
+                rememberImages(downloaded)
+                avatars.merge(downloaded) { _, new in new }
+                rememberCurrentIssue()
             }
         }
     }
@@ -214,6 +255,8 @@ public final class IssueReader {
         remoteLinksTask = nil
         avatarTask?.cancel()
         avatarTask = nil
+        imageGeneration = nil
+        activeImageURLs = []
         currentTask = nil
         requestID = UUID()
         isLoading = false

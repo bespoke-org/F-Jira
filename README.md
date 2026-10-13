@@ -61,6 +61,15 @@ preferred; raw Jira wiki text has a fallback for headings, lists, tables, links,
 and code blocks. Literal newline escapes in prose become line breaks, while code
 text preserves its escapes. Components, labels, and versions use wrapping tags.
 Comment headers show the author name, readable date, and an avatar or initials.
+Issue metadata shows Jira's Type and Priority icons, plus compact Assignee and
+Reporter avatars beside their names. These images share the offline cache with
+comment avatars; static SVG icons are supported as well as raster images.
+Images are also shared in memory by URL across issues. Cached details and their
+image bytes are read together and published as one state, so reused icons appear
+in the first render instead of being attached after the body. Older snapshots recover
+Type/Priority icon URLs from their saved full response, without requiring a network
+refresh. Metadata downloads
+run before comment-avatar batches, and new image results are applied per batch.
 
 Avatars are fetched separately and cached in SQLite for offline reuse. Jira tokens
 are sent only to the configured Jira origin, including after avatar redirects.

@@ -103,6 +103,7 @@ public struct JiraIssue: Codable, Identifiable, Sendable {
     public struct NamedValue: Codable, Sendable {
         public let name: String
         public let id: String?
+        public let iconUrl: URL?
     }
 
     public var summary: String { fields.summary ?? "" }

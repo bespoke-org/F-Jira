@@ -9,14 +9,7 @@ public enum IssueBodyHTML {
         let comments: String = detail.comments.map { comment -> String in
             let body = detail.renderedBody(for: comment).map(JiraRichText.rendered) ?? JiraRichText.wiki(comment.body ?? "")
             let name = comment.authorName
-            let avatar: String
-            if let url = comment.author?.avatarURL, let cached = avatars[url.absoluteString] {
-                avatar = "<img class=\"avatar\" src=\"\(cached.dataURL)\" alt=\"\(escape(name))\">"
-            } else {
-                let parts = name.split(whereSeparator: { $0.isWhitespace })
-                let initials = parts.count > 1 ? parts.prefix(2).compactMap(\.first).map(String.init).joined() : String(name.prefix(2))
-                avatar = "<span class=\"avatar initials\" aria-label=\"\(escape(name))\">\(escape(initials.uppercased()))</span>"
-            }
+            let avatar = avatarMarkup(name: name, url: comment.author?.avatarURL, className: "avatar", images: avatars)
             return """
                 <article class="comment">
                     <header class="comment-header">\(avatar)<div>
@@ -58,11 +51,15 @@ public enum IssueBodyHTML {
             .comment-header { display: flex; gap: 10px; align-items: center; margin: 0 0 12px; }
             .author-name { font-size: 14px; font-weight: 600; }
             .avatar { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 50%; object-fit: cover; }
+            .metadata-value { display: flex; gap: 7px; align-items: center; min-height: 20px; }
+            .metadata-icon { width: 16px; height: 16px; flex: 0 0 16px; object-fit: contain; }
+            .metadata-avatar { width: 20px; height: 20px; flex: 0 0 20px; font-size: 10px; }
             .initials { display: inline-flex; align-items: center; justify-content: center; background: #436a96; color: #fff; font-size: 13px; font-weight: 600; }
+            .metadata-avatar.initials { font-size: 10px; }
             code { font-family: ui-monospace, SFMono-Regular, monospace; background: rgba(128,128,128,.12); padding: 1px 4px; border-radius: 3px; }
             pre code { background: none; padding: 0; }
             </style></head><body>
-            \(metadata(detail))
+            \(metadata(detail, images: avatars))
             <hr class="description-divider">
             \(description)
             \(issueLinks(detail, error: issueLinksError))
@@ -82,21 +79,52 @@ public enum IssueBodyHTML {
             .replacingOccurrences(of: "'", with: "&#39;")
     }
 
-    private static func metadata(_ detail: CachedIssueDetail) -> String {
+    private static func metadata(_ detail: CachedIssueDetail, images: [String: CachedAvatar]) -> String {
         let issue = detail.issue.listIssue
         let fields = detail.issue.fields
-        var rows = [("Status", issue.status), ("Type", issue.issueType), ("Assignee", issue.assignee), ("Priority", issue.priority)]
-        if let reporter = fields.reporter { rows.append(("Reporter", reporter.displayName)) }
-        if let created = fields.created { rows.append(("Created", date(created))) }
-        if let updated = fields.updated { rows.append(("Updated", date(updated))) }
-        if let due = fields.duedate { rows.append(("Due", due)) }
-        if let resolution = fields.resolution { rows.append(("Resolution", resolution.name)) }
-        let grid: String = rows.map { row -> String in "<dt>\(escape(row.0))</dt><dd>\(escape(row.1))</dd>" }.joined()
+        var rows = [
+            ("Status", escape(issue.status)),
+            ("Type", iconValue(issue.issueType, url: fields.issuetype?.iconUrl, images: images)),
+            ("Assignee", personValue(fields.assignee, fallback: "Unassigned", images: images)),
+            ("Priority", iconValue(issue.priority, url: fields.priority?.iconUrl, images: images))
+        ]
+        if let reporter = fields.reporter { rows.append(("Reporter", personValue(reporter, fallback: "Unknown", images: images))) }
+        if let created = fields.created { rows.append(("Created", escape(date(created)))) }
+        if let updated = fields.updated { rows.append(("Updated", escape(date(updated)))) }
+        if let due = fields.duedate { rows.append(("Due", escape(due))) }
+        if let resolution = fields.resolution { rows.append(("Resolution", escape(resolution.name))) }
+        let grid: String = rows.map { row -> String in "<dt>\(escape(row.0))</dt><dd>\(row.1)</dd>" }.joined()
         let groups = [("Labels", fields.labels ?? []), ("Components", (fields.components ?? []).map(\.name)), ("Fix versions", (fields.fixVersions ?? []).map(\.name))]
         let chips: String = groups.filter { !$0.1.isEmpty }.map { title, names -> String in
             "<dt class=\"tag-label\">\(escape(title))</dt><dd><div class=\"chips\">" + names.map { name -> String in "<span class=\"chip\">\(escape(name))</span>" }.joined() + "</div></dd>"
         }.joined()
         return "<h1>\(escape(issue.summary))</h1><dl class=\"metadata\">\(grid)\(chips)</dl>"
+    }
+
+    private static func iconValue(_ name: String, url: URL?, images: [String: CachedAvatar]) -> String {
+        let icon: String
+        if let url, let cached = images[url.absoluteString] {
+            icon = "<img class=\"metadata-icon\" src=\"\(cached.dataURL)\" alt=\"\(escape(name))\">"
+        } else if url != nil {
+            icon = "<span class=\"metadata-icon\" aria-hidden=\"true\"></span>"
+        } else { icon = "" }
+        return "<span class=\"metadata-value\">\(icon)<span>\(escape(name))</span></span>"
+    }
+
+    private static func personValue(_ user: JiraUser?, fallback: String, images: [String: CachedAvatar]) -> String {
+        guard let user else { return escape(fallback) }
+        let avatar = avatarMarkup(name: user.displayName, url: user.avatarURL,
+                                  className: "avatar metadata-avatar", images: images)
+        return "<span class=\"metadata-value\">\(avatar)<span>\(escape(user.displayName))</span></span>"
+    }
+
+    private static func avatarMarkup(name: String, url: URL?, className: String, images: [String: CachedAvatar]) -> String {
+        if let url, let cached = images[url.absoluteString] {
+            return "<img class=\"\(className)\" src=\"\(cached.dataURL)\" alt=\"\(escape(name))\">"
+        }
+        let parts = name.split(whereSeparator: { $0.isWhitespace })
+        let initials = parts.count > 1 ? parts.prefix(2).compactMap(\.first).map(String.init).joined() : String(name.prefix(2))
+        return "<span class=\"\(className) initials\" aria-label=\"\(escape(name))\">\(escape(initials.uppercased()))</span>"
     }
 
     private static func issueLinks(_ detail: CachedIssueDetail, error: String?) -> String {
