@@ -15,14 +15,18 @@ isolated by server and account. Restarting the app shows the saved account
 without requiring a network connection. Use **Check connection** to verify it again.
 **Log out** removes the active token and connection selection but preserves cached data.
 No tokens are written to preferences or the database.
-The top-right account button shows your Jira avatar once downloaded and keeps it
-available offline using the same SQLite image cache as comment avatars.
+The account button at the bottom of the sidebar shows your Jira avatar once
+downloaded and keeps it available offline using the same SQLite image cache as
+comment avatars.
 
 ## Project and issue browsing
 
-The top-left project button shows the selected project's name and image. Click it
-to search and switch projects or refresh the project list. Project responses and
-images are cached for offline use. The sidebar contains app views, currently **Issues**.
+The project button in the sidebar footer shows the selected project's name, key,
+and image. Click it to search and switch projects or refresh the project list.
+Project responses and images are cached for offline use. The sidebar contains app views, currently **Issues**,
+with the project and account controls pinned at the bottom. Native window controls
+sit above the sidebar, while the issue area extends to the top of the window.
+Use the native toggle at the top of the sidebar to hide or show it.
 Select a project to run a JQL filter; fjira always adds the project restriction.
 An empty filter shows all issues, ordered by updated date and key. You can supply
 an `ORDER BY` clause, for example `assignee = currentUser() ORDER BY priority DESC`.

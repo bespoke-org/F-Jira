@@ -9,10 +9,10 @@ struct BrowserView: View {
     @State private var projectFilter = ""
     @State private var showingProjects = false
     @State private var selectedView: BrowserSection? = .issues
+    @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
 
     private enum BrowserSection: Hashable { case issues }
     @State private var selectedIssueID: String?
-    @State private var availableDetailWidth: CGFloat = 0
     @State private var sortOrder: [KeyPathComparator<JiraIssue>] = []
 
     private var filteredProjects: [JiraProject] {
@@ -25,83 +25,103 @@ struct BrowserView: View {
     private var selectedIssue: JiraIssue? { issues.first { $0.id == selectedIssueID } }
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: $selectedView) {
-                Label("Issues", systemImage: "list.bullet.rectangle")
-                    .tag(BrowserSection.issues)
-            }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 160, ideal: 200, max: 280)
-        } detail: {
-            if model.isRestoring {
-                ProgressView("Opening downloaded data…")
-            } else if model.selectedProject != nil {
-                GeometryReader { geometry in
-                    let wide = geometry.size.width >= 940
-                    HSplitView {
-                        issueList.frame(minWidth: wide ? 500 : 0)
-                        if wide && model.issueReader.selection != nil {
-                            IssueDetailView(reader: model.issueReader, site: model.connection.site, close: closeIssue)
-                                .frame(minWidth: 380, idealWidth: 440, maxWidth: 600)
-                        }
-                    }
-                    .onChange(of: geometry.size.width, initial: true) { _, width in availableDetailWidth = width }
-                    .sheet(isPresented: Binding(
-                        get: { availableDetailWidth < 940 && model.issueReader.selection != nil },
-                        set: { presented in if !presented && availableDetailWidth < 940 { closeIssue() } }
-                    )) {
-                        IssueDetailView(reader: model.issueReader, site: model.connection.site, close: closeIssue)
-                            .frame(minWidth: 560, idealWidth: 620, minHeight: 500, idealHeight: 700)
-                    }
+        NavigationSplitView(columnVisibility: $sidebarVisibility) {
+            VStack(spacing: 0) {
+                List(selection: $selectedView) {
+                    Label("Issues", systemImage: "list.bullet.rectangle")
+                        .tag(BrowserSection.issues)
                 }
-            } else {
-                ContentUnavailableView("Select a project", systemImage: "folder", description: Text("Choose a project from the top bar to browse its issues using JQL."))
+                .listStyle(.sidebar)
+                Divider()
+                sidebarFooter
             }
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
+        } detail: {
+            Group {
+                if model.isRestoring {
+                    ProgressView("Opening downloaded data…")
+                } else if model.selectedProject != nil {
+                    IssueBrowserLayout(isIssuePresented: Binding(
+                        get: { model.issueReader.selection != nil },
+                        set: { presented in if !presented { closeIssue() } }
+                    )) {
+                        issueList
+                    } detail: {
+                        IssueDetailView(reader: model.issueReader, site: model.connection.site, close: closeIssue)
+                    }
+                } else {
+                    ContentUnavailableView("Select a project", systemImage: "folder", description: Text("Choose a project at the bottom of the sidebar to browse its issues using JQL."))
+                }
+            }
+            .ignoresSafeArea(.container, edges: .top)
         }
         .navigationTitle("")
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button { showingProjects.toggle() } label: {
-                    HStack(spacing: 8) {
-                        projectImage(model.selectedProject, size: 24)
-                        Text(model.selectedProject?.name ?? "Select a project")
-                            .lineLimit(1)
-                        Image(systemName: "chevron.down")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .help("Change project")
-                .accessibilityLabel("\(model.selectedProject?.name ?? "Select a project"), change project")
-                .popover(isPresented: $showingProjects, arrowEdge: .bottom) { projectPicker }
-                .task(id: model.selectedProject?.avatarURL) {
-                    if let project = model.selectedProject { model.loadProjectAvatar(project) }
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: showAccount) {
-                    HStack(spacing: 8) {
-                        Text(model.connection.user.displayName)
-                        if let data = model.accountAvatar?.data, let image = NSImage(data: data) {
-                            Image(nsImage: image)
-                                .resizable().scaledToFill()
-                                .frame(width: 24, height: 24).clipShape(Circle())
-                        } else {
-                            Image(systemName: "person.crop.circle")
-                                .font(.system(size: 24)).frame(width: 24, height: 24)
-                        }
-                    }
-                }
-                .help("Account")
-                .accessibilityLabel("\(model.connection.user.displayName), account")
-            }
-        }
         .task { await model.restore() }
+        .onChange(of: model.selectedProjectID) { _, project in
+            if project == nil { sidebarVisibility = .all }
+        }
         .onChange(of: selectedIssueID) { _, _ in
             if let selectedIssue { model.issueReader.open(selectedIssue) }
             else { model.issueReader.close() }
         }
         .onChange(of: model.selectedProjectID) { _, _ in closeIssue(); sortOrder = [] }
         .onChange(of: model.search?.query) { _, _ in closeIssue(); sortOrder = [] }
+    }
+
+    private var sidebarFooter: some View {
+        VStack(spacing: 2) {
+            Button { showingProjects.toggle() } label: {
+                HStack(spacing: 10) {
+                    projectImage(model.selectedProject, size: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(model.selectedProject?.name ?? "Select a project")
+                            .font(.system(size: 12, weight: .medium)).lineLimit(1)
+                        if let project = model.selectedProject {
+                            Text(project.key).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .help("Change project")
+            .accessibilityLabel("\(model.selectedProject?.name ?? "Select a project"), change project")
+            .disabled(model.isRestoring)
+            .popover(isPresented: $showingProjects, arrowEdge: .trailing) { projectPicker }
+            .task(id: model.selectedProject?.avatarURL) {
+                if let project = model.selectedProject { model.loadProjectAvatar(project) }
+            }
+
+            Button(action: showAccount) {
+                HStack(spacing: 10) {
+                    if let data = model.accountAvatar?.data, let image = NSImage(data: data) {
+                        Image(nsImage: image)
+                            .resizable().scaledToFill()
+                            .frame(width: 24, height: 24).clipShape(Circle())
+                    } else {
+                        Image(systemName: "person.crop.circle")
+                            .font(.system(size: 24)).frame(width: 24, height: 24)
+                    }
+                    Text(model.connection.user.displayName)
+                        .font(.system(size: 12, weight: .medium)).lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .help("Account")
+            .accessibilityLabel("\(model.connection.user.displayName), account")
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.primary)
+        .padding(8)
     }
 
     @ViewBuilder
@@ -198,6 +218,7 @@ struct BrowserView: View {
                     }
                     .disabled(model.history.isEmpty || model.isLoadingCache)
                 }
+                .padding(.leading, sidebarVisibility == .detailOnly ? 128 : 0)
                 HStack {
                     TextField("JQL filter, e.g. assignee = currentUser() ORDER BY updated DESC", text: $model.queryText)
                         .textFieldStyle(.roundedBorder)

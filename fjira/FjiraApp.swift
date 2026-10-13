@@ -7,5 +7,6 @@ struct FjiraApp: App {
             ContentView()
         }
         .defaultSize(width: 1000, height: 700)
+        .windowStyle(.hiddenTitleBar)
     }
 }
