@@ -22,6 +22,7 @@
             productRefGroup = A00000000000000000000005;
             projectDirPath = "";
             projectRoot = "";
+            packageReferences = (A00000000000000000000010);
             targets = (A00000000000000000000002);
         };
         A00000000000000000000002 = {
@@ -32,6 +33,7 @@
             dependencies = ();
             fileSystemSynchronizedGroups = (A00000000000000000000004);
             name = fjira;
+            packageProductDependencies = (A00000000000000000000011);
             productName = fjira;
             productReference = A0000000000000000000000A;
             productType = "com.apple.product-type.application";
@@ -61,7 +63,7 @@
         A00000000000000000000007 = {
             isa = PBXFrameworksBuildPhase;
             buildActionMask = 2147483647;
-            files = ();
+            files = (A00000000000000000000012);
             runOnlyForDeploymentPostprocessing = 0;
         };
         A00000000000000000000008 = {
@@ -138,6 +140,18 @@
                 SWIFT_VERSION = 6.0;
             };
             name = Release;
+        };
+        A00000000000000000000010 = {
+            isa = XCLocalSwiftPackageReference;
+            relativePath = Packages/FjiraCore;
+        };
+        A00000000000000000000011 = {
+            isa = XCSwiftPackageProductDependency;
+            productName = FjiraCore;
+        };
+        A00000000000000000000012 = {
+            isa = PBXBuildFile;
+            productRef = A00000000000000000000011;
         };
     };
     rootObject = A00000000000000000000001;
