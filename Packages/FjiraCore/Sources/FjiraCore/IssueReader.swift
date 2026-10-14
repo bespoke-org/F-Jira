@@ -48,7 +48,7 @@ public final class IssueReader {
         isOffline = false
         let saved = recentIssues[issue.id]
         rememberImages(saved?.avatars ?? [:])
-        let knownURLs = saved?.detail.imageURLs ?? [issue.fields.issuetype?.iconUrl, issue.fields.priority?.iconUrl,
+        let knownURLs = saved?.detail.imageURLs(baseURL: site.url) ?? [issue.fields.issuetype?.iconUrl, issue.fields.priority?.iconUrl,
                                                     issue.fields.assignee?.avatarURL].compactMap { $0 }
         avatars = imagesInMemory(for: knownURLs, cached: saved?.avatars ?? [:])
         detail = saved?.detail
@@ -153,7 +153,7 @@ public final class IssueReader {
     }
 
     private func present(_ detail: CachedIssueDetail, images: [String: CachedAvatar]) {
-        let combined = imagesInMemory(for: detail.imageURLs, cached: images)
+        let combined = imagesInMemory(for: detail.imageURLs(baseURL: site.url), cached: images)
         rememberImages(combined)
         // Publish the image bytes before the issue so its first render is complete.
         avatars = combined
@@ -188,7 +188,7 @@ public final class IssueReader {
 
     private func loadAvatars(_ detail: CachedIssueDetail) {
         let generation = requestID
-        let urls = detail.imageURLs
+        let urls = detail.imageURLs(baseURL: site.url)
         // An issue refresh with the same URLs must not restart in-flight image requests.
         if avatarTask != nil, imageGeneration == generation, activeImageURLs == urls { return }
         avatarTask?.cancel()

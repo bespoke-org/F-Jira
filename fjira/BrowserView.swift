@@ -248,7 +248,7 @@ struct BrowserView: View {
                             .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     } else {
                         Text("Results for: \(search.query.jql)")
-                            .font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                            .font(.custom("Menlo", size: 11, relativeTo: .caption)).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                 }
             }

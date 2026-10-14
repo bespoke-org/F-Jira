@@ -25,7 +25,7 @@ extension ConnectionCache {
         -> (detail: CachedIssueDetail, images: [String: CachedAvatar])? {
         try database.read { db in
             guard let detail = try Self.readDetail(in: db, site: site, account: account, id: id) else { return nil }
-            let urls = detail.imageURLs
+            let urls = URL(string: site).map { detail.imageURLs(baseURL: $0) } ?? detail.imageURLs
             var images: [String: CachedAvatar] = [:]
             for offset in stride(from: 0, to: urls.count, by: 200) {
                 let resources = urls[offset..<min(offset + 200, urls.count)].map { "avatar:\($0.absoluteString)" }

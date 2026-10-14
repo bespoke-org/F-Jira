@@ -84,9 +84,11 @@ Type/Priority icon URLs from their saved full response, without requiring a netw
 refresh. Metadata downloads
 run before comment-avatar batches, and new image results are applied per batch.
 
-Avatars are fetched separately and cached in SQLite for offline reuse. Jira tokens
+Avatars and Jira inline images, including emoticons in descriptions and comments,
+are fetched separately and cached in SQLite for offline reuse. Inline image URLs
+resolve against the configured Jira URL, including its context path. Jira tokens
 are sent only to the configured Jira origin, including after avatar redirects.
-The HTML document embeds cached avatar bytes and does not fetch remote resources
+The HTML document embeds cached image bytes and does not fetch remote resources
 or execute page scripts. Updating avatars or comments preserves scroll position.
 Switching issues keeps the same viewport and replaces its document in one browser
 update, so the previous body stays visible until the next body is available.

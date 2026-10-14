@@ -209,6 +209,52 @@ final class IssueViewportTests: XCTestCase {
         XCTAssertEqual(position, "350", "Avatar and comment updates must not jump to the top")
     }
 
+    func testJiraEmoticonsRenderInlineFromCachedBytes() async throws {
+        _ = NSApplication.shared
+        let site = try JiraSite("https://jira.example.com/jira")
+        let url = site.url.appending(path: "images/icons/emoticons/smile.gif")
+        let gif = Data(base64Encoded: "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")!
+        let object: [String: Any] = ["id": "100", "key": "EX-1", "fields": [
+            "summary": "Fixture", "comment": ["comments": [["id": "c1", "body": "Reply :)"]]]
+        ], "renderedFields": [
+            "description": "<p id='emoji-description'>Hello <img class='emoticon' src='\(url.absoluteString)' alt=':)' width='16' height='16'> 🙂</p>",
+            "comment": ["comments": [["id": "c1", "body": "<p id='emoji-comment'>Reply <img class='emoticon' src='/jira/images/icons/emoticons/smile.gif' alt=':)' width='16' height='16'></p>"]]]
+        ]]
+        let detail = try await JiraClient(transport: FixtureTransport(data: JSONSerialization.data(withJSONObject: object)))
+            .issue(site: site, token: "fixture-token", id: "100")
+        let image = CachedAvatar(data: gif, mimeType: "image/gif", fetchedAt: Date())
+        let document = IssueBodyHTML.document(detail: detail, baseURL: site.url, dark: false,
+                                              avatars: [url.absoluteString: image])
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: RenderedIssueBody(document: document))
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.contentView = nil; window.close() }
+        var web: WKWebView?
+        for _ in 0..<100 {
+            web = findWebView(host)
+            if let web, (try? await evaluate(web, "String(document.querySelectorAll('.emoticon').length)")) == "2" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let content = try XCTUnwrap(web)
+        for _ in 0..<100 {
+            if (try? await evaluate(content, "String([...document.querySelectorAll('.emoticon')].every(img => img.complete && img.naturalWidth > 0))")) == "true" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let loaded = try await evaluate(content, "String([...document.querySelectorAll('.emoticon')].every(img => img.complete && img.naturalWidth > 0))")
+        XCTAssertEqual(loaded, "true", "Jira emoticons must actually decode under the document CSP")
+        for id in ["emoji-description", "emoji-comment"] {
+            let size = try await evaluate(content, "String(document.querySelector('#\(id) img').getBoundingClientRect().width)")
+            XCTAssertEqual(size, "16", "Jira emoticons must retain their inline icon size")
+            let inline = try await evaluate(content, "String(getComputedStyle(document.querySelector('#\(id) img')).display)")
+            XCTAssertEqual(inline, "inline")
+        }
+        let unicode = try await evaluate(content, "String(document.body.textContent.includes('🙂'))")
+        XCTAssertEqual(unicode, "true")
+    }
+
     private func findWebView(_ view: NSView) -> WKWebView? {
         if let web = view as? WKWebView { return web }
         return view.subviews.lazy.compactMap { self.findWebView($0) }.first

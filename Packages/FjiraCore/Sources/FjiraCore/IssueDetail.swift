@@ -131,6 +131,13 @@ public struct CachedIssueDetail: Codable, Sendable {
         return (metadata + comments.compactMap { $0.author?.avatarURL }).filter { seen.insert($0).inserted }
     }
 
+    func imageURLs(baseURL: URL) -> [URL] {
+        let rendered = ([issue.renderedFields?.description] + comments.map { renderedBody(for: $0) }).compactMap { $0 }
+        var seen = Set<URL>()
+        return (imageURLs + rendered.flatMap { JiraRichTextImages.urls(in: $0, baseURL: baseURL) })
+            .filter { seen.insert($0).inserted }
+    }
+
     public var currentComments: [JiraComment] {
         var seen = Set<String>()
         return ((issue.fields.comment?.comments ?? []) + commentPages.flatMap(\.page.comments))

@@ -23,7 +23,7 @@ public struct IssueDetailView: View {
     public var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(issue?.key ?? "Issue").font(.headline.monospaced()).textSelection(.enabled)
+                Text(issue?.key ?? "Issue").font(.custom("Menlo", size: 13, relativeTo: .headline).weight(.semibold)).textSelection(.enabled)
                 Spacer()
                 if reader.isLoading && reader.detail == nil { ProgressView().controlSize(.small) }
                 Button { reader.refresh() } label: { Image(systemName: "arrow.clockwise") }

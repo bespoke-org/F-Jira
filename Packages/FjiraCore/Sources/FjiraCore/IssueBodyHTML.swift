@@ -2,12 +2,15 @@ import Foundation
 
 public enum IssueBodyHTML {
     public static func document(detail: CachedIssueDetail, baseURL: URL, dark: Bool, avatars: [String: CachedAvatar] = [:], issueLinksError: String? = nil) -> String {
-        let description = detail.issue.renderedFields?.description.map(JiraRichText.rendered)
+        func rendered(_ html: String) -> String {
+            JiraRichText.rendered(JiraRichTextImages.embedding(html, baseURL: baseURL, images: avatars))
+        }
+        let description = detail.issue.renderedFields?.description.map(rendered)
             ?? JiraRichText.wiki(detail.issue.fields.description ?? "No description.")
         let currentIDs = Set(detail.currentComments.map(\.id))
         // Explicit String results prevent GRDB's SQL interpolation from capturing HTML.
         let comments: String = detail.comments.map { comment -> String in
-            let body = detail.renderedBody(for: comment).map(JiraRichText.rendered) ?? JiraRichText.wiki(comment.body ?? "")
+            let body = detail.renderedBody(for: comment).map(rendered) ?? JiraRichText.wiki(comment.body ?? "")
             let name = comment.authorName
             let avatar = avatarMarkup(name: name, url: comment.author?.avatarURL, className: "avatar", images: avatars)
             return """
@@ -46,13 +49,15 @@ public enum IssueBodyHTML {
             .chip { display: inline-block; border: 1px solid rgba(128,128,128,.35); background: rgba(128,128,128,.12); border-radius: 5px; padding: 2px 8px; }
             .muted { opacity: .65; font-size: 12px; }
             .related { display: block; padding: 6px 0; }
+            .issue-link-label { margin-right: 6px; }
             h2 { font-size: 16px; margin: 18px 0 10px; }
             h2:first-child { margin-top: 0; }
             a { color: \(dark ? "#75baff" : "#0066cc"); }
-            pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: rgba(128,128,128,.12); border-radius: 6px; }
+            pre { font-family: Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: rgba(128,128,128,.12); border-radius: 6px; }
             table { border-collapse: collapse; display: block; overflow-x: auto; }
             th, td { border: 1px solid #888; padding: 6px; }
             img { max-width: 100%; height: auto; }
+            img.emoticon, img.emoji { width: 16px; height: 16px; vertical-align: text-bottom; }
             blockquote { border-left: 3px solid #888; margin-left: 0; padding-left: 12px; }
             .comment { border-top: 1px solid rgba(128,128,128,.3); padding: 12px 0; }
             .comment-header { display: flex; gap: 10px; align-items: center; margin: 0 0 12px; }
@@ -63,7 +68,7 @@ public enum IssueBodyHTML {
             .metadata-avatar { width: 20px; height: 20px; flex: 0 0 20px; font-size: 10px; }
             .initials { display: inline-flex; align-items: center; justify-content: center; background: #436a96; color: #fff; font-size: 13px; font-weight: 600; }
             .metadata-avatar.initials { font-size: 10px; }
-            code { font-family: ui-monospace, SFMono-Regular, monospace; background: rgba(128,128,128,.12); padding: 1px 4px; border-radius: 3px; }
+            code { font-family: Menlo, monospace; background: rgba(128,128,128,.12); padding: 1px 4px; border-radius: 3px; }
             pre code { background: none; padding: 0; }
             </style></head><body>
             \(metadata(detail, images: avatars))
@@ -137,7 +142,7 @@ public enum IssueBodyHTML {
     private static func issueLinks(_ detail: CachedIssueDetail, error: String?) -> String {
         let jiraLinks: String = (detail.issue.fields.issuelinks ?? []).compactMap { item -> String? in
             item.relatedIssue.map { issue in
-                "<div class=\"muted\">\(escape(item.label))</div><a class=\"related\" href=\"fjira://issue/\(escape(issue.id))\">\(escape(issue.key)): \(escape(issue.summary))</a>"
+                "<div class=\"related\"><span class=\"muted issue-link-label\">\(escape(item.label))</span> <a href=\"fjira://issue/\(escape(issue.id))\">\(escape(issue.key)): \(escape(issue.summary))</a></div>"
             }
         }.joined()
         let remoteLinks: String = (detail.remoteLinks?.links ?? []).map { link -> String in
@@ -149,7 +154,8 @@ public enum IssueBodyHTML {
             let context = [link.relationship, link.application?.name, link.object.status?.resolved == true ? "Resolved" : nil]
                 .compactMap { $0 }.filter { !$0.isEmpty }.map(escape).joined(separator: " · ")
             let summary = link.object.summary.map { "<div class=\"muted\">\(escape($0))</div>" } ?? ""
-            return "<div class=\"remote-link related\"><div class=\"muted\">\(context)</div>\(anchor)\(summary)</div>"
+            let label = context.isEmpty ? "" : "<span class=\"muted issue-link-label\">\(context)</span> "
+            return "<div class=\"remote-link related\">\(label)\(anchor)\(summary)</div>"
         }.joined()
         let notice = error.map { "<p class=\"muted\">\(escape($0))</p>" } ?? ""
         guard !jiraLinks.isEmpty || !remoteLinks.isEmpty || error != nil else { return "" }
