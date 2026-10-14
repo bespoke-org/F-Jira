@@ -28,7 +28,7 @@ public enum IssueBodyHTML {
         let foreground = dark ? "#eeeeee" : "#222222"
         let statusStyles: String = JiraStatusTone.allCases.map { tone -> String in
             let palette = tone.palette(dark: dark)
-            return ".status-\(tone.rawValue) { color: \(palette.foregroundCSS); background: \(palette.backgroundCSS); }"
+            return ".status-\(tone.rawValue) { color: \(palette.foregroundCSS); background: \(palette.backgroundCSS); box-shadow: inset 0 0 0 \(palette.borderWidth)px \(palette.borderCSS); }"
         }.joined(separator: "\n")
         return """
             <!doctype html><html><head><meta charset="utf-8">
@@ -40,20 +40,22 @@ public enum IssueBodyHTML {
             h1 { font-size: 20px; line-height: 1.3; margin: 0 0 18px; }
             .metadata { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 7px 14px; margin-bottom: 14px; }
             hr { border: 0; border-top: 1px solid rgba(128,128,128,.3); margin: 18px 0; }
-            .status-pill { display: inline-flex; align-items: center; max-width: 100%; box-sizing: border-box; padding: 3px 8px; border-radius: 5px; font-size: 12px; font-weight: 500; line-height: 16px; }
+            .status-pill, .chip { border-radius: \(IssuePillStyle.cornerRadius)px; }
+            .status-pill { display: inline-flex; align-items: center; max-width: 100%; box-sizing: border-box; padding: 3px 8px; font-size: 12px; font-weight: 500; line-height: 16px; }
             .status-pill > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             \(statusStyles)
             .metadata dt { opacity: .65; } .metadata dd { margin: 0; }
             .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
             .tag-label { padding-top: 2px; }
-            .chip { display: inline-block; border: 1px solid rgba(128,128,128,.35); background: rgba(128,128,128,.12); border-radius: 5px; padding: 2px 8px; }
+            .chip { display: inline-block; border: 1px solid rgba(128,128,128,.35); background: rgba(128,128,128,.12); padding: 2px 8px; }
             .muted { opacity: .65; font-size: 12px; }
             .related { display: block; padding: 6px 0; }
             .issue-link-label { margin-right: 6px; }
             h2 { font-size: 16px; margin: 18px 0 10px; }
             h2:first-child { margin-top: 0; }
             a { color: \(dark ? "#75baff" : "#0066cc"); }
-            pre { font-family: Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: rgba(128,128,128,.12); border-radius: 6px; }
+            pre, code, tt { font-family: Menlo, monospace; }
+            pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: rgba(128,128,128,.12); border-radius: 6px; }
             table { border-collapse: collapse; display: block; overflow-x: auto; }
             th, td { border: 1px solid #888; padding: 6px; }
             img { max-width: 100%; height: auto; }
@@ -68,7 +70,7 @@ public enum IssueBodyHTML {
             .metadata-avatar { width: 20px; height: 20px; flex: 0 0 20px; font-size: 10px; }
             .initials { display: inline-flex; align-items: center; justify-content: center; background: #436a96; color: #fff; font-size: 13px; font-weight: 600; }
             .metadata-avatar.initials { font-size: 10px; }
-            code { font-family: Menlo, monospace; background: rgba(128,128,128,.12); padding: 1px 4px; border-radius: 3px; }
+            code { background: rgba(128,128,128,.12); padding: 1px 4px; border-radius: 3px; }
             pre code { background: none; padding: 0; }
             </style></head><body>
             \(metadata(detail, images: avatars))

@@ -47,7 +47,7 @@ struct BrowserView: View {
                     )) {
                         issueList
                     } detail: {
-                        IssueDetailView(reader: model.issueReader, site: model.connection.site, close: closeIssue)
+                        IssueDetailView(reader: model.issueReader, site: model.connection.site, close: closeIssue, commands: commandContext)
                     }
                 } else {
                     ContentUnavailableView("Select a project", systemImage: "folder", description: Text("Choose a project at the bottom of the sidebar to search its issues."))
@@ -56,6 +56,7 @@ struct BrowserView: View {
             .ignoresSafeArea(.container, edges: .top)
         }
         .navigationTitle("")
+        .focusedSceneValue(\.jiraCommandContext, commandContext)
         .task { await model.restore() }
         .onChange(of: model.selectedProjectID) { _, project in
             if project == nil { sidebarVisibility = .all }
@@ -225,10 +226,10 @@ struct BrowserView: View {
                         .onSubmit { model.runSearch() }
                         .help("Type words to search titles and descriptions, or paste JQL. Use text: or jql: to choose explicitly.")
                         .disabled(model.isLoadingCache)
-                    Button("Search") { model.runSearch() }
+                    Button("Search") { commandContext.perform(.search) }
                         .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.return, modifiers: .command)
-                        .disabled(model.isLoadingCache)
+                        .help(JiraCommand.search.help)
+                        .disabled(!commandContext.isEnabled(.search))
                     if model.isSearching {
                         ProgressView().controlSize(.small)
                         Button("Cancel") { model.cancelSearch() }
@@ -271,7 +272,7 @@ struct BrowserView: View {
                         Text(issue.summary).lineLimit(1).help(issue.summary)
                     }
                 }.width(min: 220, ideal: 380)
-                TableColumn("Status", value: \.status) { issue in
+                TableColumn("Status", value: \.statusSortKey) { issue in
                     StatusPill(name: issue.status, tone: issue.statusTone)
                 }.width(min: 100, ideal: 140)
                 TableColumn("Assignee", value: \.assignee) { issue in
@@ -316,7 +317,8 @@ struct BrowserView: View {
                 }
             }
             .contextMenu {
-                Button("Open in Jira") { openSelectedIssue() }.disabled(selectedIssue == nil)
+                Button("Open in Jira") { commandContext.perform(.openInJira) }
+                    .disabled(!commandContext.isEnabled(.openInJira))
                 Button("Copy issue key") {
                     if let selectedIssue {
                         NSPasteboard.general.clearContents()
@@ -336,8 +338,9 @@ struct BrowserView: View {
                     }
                 }
                 Spacer()
-                Button("Open in Jira", systemImage: "arrow.up.right.square") { openSelectedIssue() }
-                    .disabled(selectedIssue == nil)
+                Button("Open in Jira", systemImage: JiraCommand.openInJira.symbol) { commandContext.perform(.openInJira) }
+                    .help(JiraCommand.openInJira.help)
+                    .disabled(!commandContext.isEnabled(.openInJira))
             }
             .font(.caption)
             .padding(12)
@@ -350,8 +353,20 @@ struct BrowserView: View {
         model.issueReader.close()
     }
 
-    private func openSelectedIssue() {
-        guard let selectedIssue else { return }
-        NSWorkspace.shared.open(model.connection.site.url.appending(path: "browse/\(selectedIssue.key)"))
+    private var commandContext: JiraCommandContext {
+        let currentIssue = model.issueReader.selection ?? selectedIssue
+        let canSearch = model.selectedProject != nil && !model.isRestoring
+            && !model.isLoadingCache && !model.isSearching
+        return JiraCommandContext([
+            .openInJira: JiraCommandAction(isEnabled: currentIssue != nil) {
+                guard let currentIssue else { return }
+                NSWorkspace.shared.open(model.connection.site.url.appending(path: "browse/\(currentIssue.key)"))
+            },
+            .refresh: JiraCommandAction(isEnabled: currentIssue != nil ? !model.issueReader.isLoading : canSearch) {
+                if currentIssue != nil { model.issueReader.refresh() }
+                else { model.runSearch() }
+            },
+            .search: JiraCommandAction(isEnabled: canSearch) { model.runSearch() }
+        ])
     }
 }

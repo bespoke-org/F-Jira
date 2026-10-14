@@ -255,6 +255,40 @@ final class IssueViewportTests: XCTestCase {
         XCTAssertEqual(unicode, "true")
     }
 
+    func testInlineMonospaceUsesMenloInDescriptionAndComments() async throws {
+        _ = NSApplication.shared
+        let markup = "<p>Inline <tt>legacy code</tt> and <code>code</code>.</p><pre>block code</pre>"
+        let object: [String: Any] = ["id": "100", "key": "EX-1", "fields": [
+            "summary": "Fixture", "comment": ["comments": [["id": "c1", "body": "Reply"]]]
+        ], "renderedFields": [
+            "description": markup,
+            "comment": ["comments": [["id": "c1", "body": markup]]]
+        ]]
+        let site = try JiraSite("https://jira.example.com")
+        let detail = try await JiraClient(transport: FixtureTransport(data: JSONSerialization.data(withJSONObject: object)))
+            .issue(site: site, token: "fixture-token", id: "100")
+        let document = IssueBodyHTML.document(detail: detail, baseURL: site.url, dark: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: RenderedIssueBody(document: document))
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.contentView = nil; window.close() }
+        var web: WKWebView?
+        for _ in 0..<100 {
+            web = findWebView(host)
+            if let web, (try? await evaluate(web, "String(document.querySelectorAll('tt').length)")) == "2" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let content = try XCTUnwrap(web)
+        for tag in ["tt", "code", "pre"] {
+            let usesMenlo = try await evaluate(content,
+                "String([...document.querySelectorAll('\(tag)')].every(el => getComputedStyle(el).fontFamily.startsWith('Menlo')))")
+            XCTAssertEqual(usesMenlo, "true", "\(tag) must use Menlo in both descriptions and comments")
+        }
+    }
+
     private func findWebView(_ view: NSView) -> WKWebView? {
         if let web = view as? WKWebView { return web }
         return view.subviews.lazy.compactMap { self.findWebView($0) }.first

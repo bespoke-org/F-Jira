@@ -6,13 +6,15 @@ public struct IssueDetailView: View {
     @Bindable var reader: IssueReader
     let site: JiraSite
     let close: () -> Void
+    private let commands: JiraCommandContext?
     @Environment(\.colorScheme) private var colorScheme
     @State private var lastPresentedIssue: JiraIssue?
 
-    public init(reader: IssueReader, site: JiraSite, close: @escaping () -> Void) {
+    public init(reader: IssueReader, site: JiraSite, close: @escaping () -> Void, commands: JiraCommandContext? = nil) {
         self.reader = reader
         self.site = site
         self.close = close
+        self.commands = commands
     }
 
     private var issue: JiraIssue? { reader.detail?.issue.listIssue ?? (reader.isLoading ? lastPresentedIssue : nil) ?? reader.selection }
@@ -26,9 +28,8 @@ public struct IssueDetailView: View {
                 Text(issue?.key ?? "Issue").font(.custom("Menlo", size: 13, relativeTo: .headline).weight(.semibold)).textSelection(.enabled)
                 Spacer()
                 if reader.isLoading && reader.detail == nil { ProgressView().controlSize(.small) }
-                Button { reader.refresh() } label: { Image(systemName: "arrow.clockwise") }
-                    .help("Refresh issue").disabled(reader.isLoading)
-                Button { openInJira() } label: { Image(systemName: "arrow.up.right.square") }.help("Open in Jira")
+                JiraCommandIconButton(.refresh, context: commandContext)
+                JiraCommandIconButton(.openInJira, context: commandContext)
                 Button(action: close) { Image(systemName: "xmark") }.help("Close issue")
             }
             .buttonStyle(.borderless).padding(16)
@@ -75,8 +76,15 @@ public struct IssueDetailView: View {
         if let related = candidates.first(where: { $0.id == url.lastPathComponent }) { reader.open(related) }
     }
 
+    private var commandContext: JiraCommandContext {
+        commands ?? JiraCommandContext([
+            .refresh: JiraCommandAction(isEnabled: reader.selection != nil && !reader.isLoading) { reader.refresh() },
+            .openInJira: JiraCommandAction(isEnabled: reader.selection != nil) { openInJira() }
+        ])
+    }
+
     private func openInJira() {
-        guard let issue else { return }
+        guard let issue = reader.selection else { return }
         NSWorkspace.shared.open(site.url.appending(path: "browse/\(issue.key)"))
     }
 }

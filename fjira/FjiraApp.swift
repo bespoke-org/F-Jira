@@ -1,3 +1,4 @@
+import FjiraUI
 import SwiftUI
 
 @main
@@ -10,6 +11,7 @@ struct FjiraApp: App {
         }
         .defaultSize(width: 1000, height: 700)
         .windowStyle(.hiddenTitleBar)
+        .commands { JiraCommands() }
     }
 }
 

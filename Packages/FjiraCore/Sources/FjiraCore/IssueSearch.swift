@@ -153,6 +153,9 @@ public struct JiraIssue: Codable, Identifiable, Sendable {
 
     public var summary: String { fields.summary ?? "" }
     public var status: String { fields.status?.name ?? "—" }
+    public var statusSortKey: JiraStatusSortKey {
+        JiraStatusSortKey(name: fields.status?.name, category: fields.status?.statusCategory)
+    }
     public var statusTone: JiraStatusTone { fields.status?.statusCategory?.tone ?? .neutral }
     public var assignee: String { fields.assignee?.displayName ?? "Unassigned" }
     public var priority: String { fields.priority?.name ?? "—" }

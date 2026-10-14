@@ -39,7 +39,14 @@ Punctuation is escaped and words are case-insensitive. Search uses Jira's read-o
 
 Results are downloaded in pages of up to 50 issues. **Load more** follows the
 server's actual page size. Table headers sort downloaded rows; JQL ordering
-controls the complete result set. Each title is preceded by its Jira task-type icon,
+controls the complete result set. Status sorting follows New → Backlog → Analysis →
+Developing → Reviewing → Ready for testing → Testing → Ready to release → Done.
+`In Progress`/`Developing`, `Review`/`Reviewing`, and
+`Ready to release`/`Ready for release` share their respective stages. Unrecognized statuses follow their Jira category, then name: To Do statuses after
+Backlog, In Progress statuses before Done, and completed statuses after Done.
+Statuses without a category follow those; missing statuses are last. Descending
+sorting reverses this order. This local policy also works with downloaded data;
+it does not infer a server workflow or alter JQL ordering. Each title is preceded by its Jira task-type icon,
 with the type name available on hover. Assignee names have circular profile images,
 and priorities show their Jira icons. Images are loaded once per URL and reused
 across rows and issue details; saved results include cached images on their first
@@ -142,3 +149,12 @@ The original logo is in `artwork/F Jira.png`. The rounded macOS icon with transp
 corners is in `artwork/F Jira App Icon.png`. Run `python3 scripts/generate-app-icons.py`
 to regenerate the macOS app-icon catalog, standalone iconset, and `artwork/F Jira.icns`.
 The built application is `build/Build/Products/Debug/F Jira.app`.
+
+Keyboard commands are defined in `FjiraUI/JiraCommands.swift`. Cmd+O opens the
+current issue in Jira; Cmd+R refreshes the open issue or reruns the search when
+no issue is open. Cmd+Return runs the search. The Jira menu owns the bindings,
+and buttons share their actions, availability, and shortcut tooltips through
+`JiraCommandContext`. Each browser window supplies its context with
+`focusedSceneValue`, so commands work from the table, search field, and issue
+body and are disabled outside the browser. To add a command, add its identity
+and presentation to `JiraCommand` and provide its action in the window context.

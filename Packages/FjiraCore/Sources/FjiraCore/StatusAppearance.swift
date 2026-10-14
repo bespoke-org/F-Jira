@@ -39,6 +39,11 @@ public enum JiraStatusTone: String, CaseIterable, Sendable {
 public struct JiraStatusPalette: Sendable {
     public let foreground: UInt32
     public let background: UInt32
+    public var borderOpacity: Double { 0.25 }
+    public var borderWidth: Double { 0.5 }
+    var borderCSS: String {
+        "rgba(\((foreground >> 16) & 0xFF), \((foreground >> 8) & 0xFF), \(foreground & 0xFF), \(borderOpacity))"
+    }
     var foregroundCSS: String { String(format: "#%06x", foreground) }
     var backgroundCSS: String { String(format: "#%06x", background) }
 }

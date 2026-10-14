@@ -20,7 +20,11 @@ public struct StatusPill: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .foregroundStyle(color(palette.foreground))
-            .background(color(palette.background), in: RoundedRectangle(cornerRadius: 5))
+            .background(color(palette.background), in: RoundedRectangle(cornerRadius: IssuePillStyle.cornerRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: IssuePillStyle.cornerRadius)
+                    .strokeBorder(color(palette.foreground).opacity(palette.borderOpacity), lineWidth: palette.borderWidth)
+            }
             .help(name)
             .accessibilityLabel(name)
     }
