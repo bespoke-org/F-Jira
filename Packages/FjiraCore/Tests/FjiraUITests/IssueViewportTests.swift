@@ -255,6 +255,17 @@ final class IssueViewportTests: XCTestCase {
         XCTAssertEqual(unicode, "true")
     }
 
+    func testUnassignedPlaceholderHasEnoughPixelsForRetinaDisplay() throws {
+        for dark in [false, true] {
+            let url = try XCTUnwrap(PersonAvatarPlaceholder.dataURL(dark: dark))
+            let encoded = try XCTUnwrap(url.split(separator: ",").last)
+            let data = try XCTUnwrap(Data(base64Encoded: String(encoded)))
+            let bitmap = try XCTUnwrap(NSBitmapImageRep(data: data))
+            XCTAssertGreaterThanOrEqual(bitmap.pixelsWide, 40, "A 20-point avatar needs at least 40 pixels on Retina")
+            XCTAssertGreaterThanOrEqual(bitmap.pixelsHigh, 40)
+        }
+    }
+
     func testInlineMonospaceUsesMenloInDescriptionAndComments() async throws {
         _ = NSApplication.shared
         let markup = "<p>Inline <tt>legacy code</tt> and <code>code</code>.</p><pre>block code</pre>"

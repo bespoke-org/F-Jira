@@ -39,7 +39,13 @@ final class ImplementerTests: XCTestCase {
         let snapshot = CachedIssueDetail(issue: issue, response: Data(json.utf8), fetchedAt: Date(),
                                          generation: UUID(), commentPages: [], previousComments: [])
         let html = IssueBodyHTML.document(detail: snapshot, baseURL: URL(string: "https://jira.example.com")!, dark: false)
-        XCTAssertTrue(html.contains("<dt>Implementer</dt><dd>Unassigned</dd>"))
+        XCTAssertTrue(html.contains("<dt>Implementer</dt><dd><span class=\"metadata-value\"><span>Unassigned</span></span></dd>"))
+        let placeholder = CachedAvatar(data: implementerPNG, mimeType: "image/png", fetchedAt: Date()).dataURL
+        let withIcons = IssueBodyHTML.document(detail: snapshot, baseURL: URL(string: "https://jira.example.com")!,
+                                               dark: false, personPlaceholderDataURL: placeholder)
+        XCTAssertEqual(withIcons.components(separatedBy: "person-placeholder").count - 1, 2,
+                       "Both unassigned Assignee and Implementer should show the local placeholder")
+        XCTAssertTrue(withIcons.contains("src=\"\(placeholder)\""))
         let absent = try JSONDecoder().decode(JiraIssueDetail.self, from: Data(#"{"id":"100","key":"EX-1","fields":{}}"#.utf8))
         XCTAssertFalse(absent.hasImplementerField)
         XCTAssertNil(absent.implementer)

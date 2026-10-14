@@ -19,7 +19,7 @@ public struct IssueDetailView: View {
 
     private var issue: JiraIssue? { reader.detail?.issue.listIssue ?? (reader.isLoading ? lastPresentedIssue : nil) ?? reader.selection }
     private var document: String? {
-        reader.detail.map { IssueBodyHTML.document(detail: $0, baseURL: site.url, dark: colorScheme == .dark, avatars: reader.avatars, issueLinksError: reader.remoteLinksError) }
+        reader.detail.map { IssueBodyHTML.document(detail: $0, baseURL: site.url, dark: colorScheme == .dark, avatars: reader.avatars, issueLinksError: reader.remoteLinksError, personPlaceholderDataURL: PersonAvatarPlaceholder.dataURL(dark: colorScheme == .dark)) }
     }
 
     public var body: some View {

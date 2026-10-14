@@ -1,7 +1,7 @@
 import Foundation
 
 public enum IssueBodyHTML {
-    public static func document(detail: CachedIssueDetail, baseURL: URL, dark: Bool, avatars: [String: CachedAvatar] = [:], issueLinksError: String? = nil) -> String {
+    public static func document(detail: CachedIssueDetail, baseURL: URL, dark: Bool, avatars: [String: CachedAvatar] = [:], issueLinksError: String? = nil, personPlaceholderDataURL: String? = nil) -> String {
         func rendered(_ html: String) -> String {
             JiraRichText.rendered(JiraRichTextImages.embedding(html, baseURL: baseURL, images: avatars))
         }
@@ -73,7 +73,7 @@ public enum IssueBodyHTML {
             code { background: rgba(128,128,128,.12); padding: 1px 4px; border-radius: 3px; }
             pre code { background: none; padding: 0; }
             </style></head><body>
-            \(metadata(detail, images: avatars))
+            \(metadata(detail, images: avatars, personPlaceholderDataURL: personPlaceholderDataURL))
             <hr class="description-divider">
             \(description)
             \(issueLinks(detail, error: issueLinksError))
@@ -93,19 +93,19 @@ public enum IssueBodyHTML {
             .replacingOccurrences(of: "'", with: "&#39;")
     }
 
-    private static func metadata(_ detail: CachedIssueDetail, images: [String: CachedAvatar]) -> String {
+    private static func metadata(_ detail: CachedIssueDetail, images: [String: CachedAvatar], personPlaceholderDataURL: String?) -> String {
         let issue = detail.issue.listIssue
         let fields = detail.issue.fields
         var rows = [
             ("Status", "<span class=\"status-pill status-\(issue.statusTone.rawValue)\" title=\"\(escape(issue.status))\"><span>\(escape(issue.status))</span></span>"),
             ("Type", iconValue(issue.issueType, url: fields.issuetype?.iconUrl, images: images)),
             ("Priority", iconValue(issue.priority, url: fields.priority?.iconUrl, images: images)),
-            ("Assignee", personValue(fields.assignee, fallback: "Unassigned", images: images))
+            ("Assignee", personValue(fields.assignee, fallback: "Unassigned", images: images, placeholderDataURL: personPlaceholderDataURL))
         ]
         if detail.issue.hasImplementerField {
-            rows.append(("Implementer", personValue(detail.issue.implementer, fallback: "Unassigned", images: images)))
+            rows.append(("Implementer", personValue(detail.issue.implementer, fallback: "Unassigned", images: images, placeholderDataURL: personPlaceholderDataURL)))
         }
-        if let reporter = fields.reporter { rows.append(("Reporter", personValue(reporter, fallback: "Unknown", images: images))) }
+        if let reporter = fields.reporter { rows.append(("Reporter", personValue(reporter, fallback: "Unknown", images: images, placeholderDataURL: personPlaceholderDataURL))) }
         if let epic = detail.issue.epicLink {
             let title = epic.summary.map { "\(epic.key): \($0)" } ?? epic.key
             rows.append(("Epic Link", "<a href=\"fjira://epic/\(escape(epic.key))\">\(escape(title))</a>"))
@@ -132,8 +132,13 @@ public enum IssueBodyHTML {
         return "<span class=\"metadata-value\">\(icon)<span>\(escape(name))</span></span>"
     }
 
-    private static func personValue(_ user: JiraUser?, fallback: String, images: [String: CachedAvatar]) -> String {
-        guard let user else { return escape(fallback) }
+    private static func personValue(_ user: JiraUser?, fallback: String, images: [String: CachedAvatar], placeholderDataURL: String?) -> String {
+        guard let user else {
+            let avatar = placeholderDataURL.map {
+                "<img class=\"avatar metadata-avatar person-placeholder\" src=\"\(escape($0))\" alt=\"\" aria-hidden=\"true\">"
+            } ?? ""
+            return "<span class=\"metadata-value\">\(avatar)<span>\(escape(fallback))</span></span>"
+        }
         let avatar = avatarMarkup(name: user.displayName, url: user.avatarURL,
                                   className: "avatar metadata-avatar", images: images)
         return "<span class=\"metadata-value\">\(avatar)<span>\(escape(user.displayName))</span></span>"

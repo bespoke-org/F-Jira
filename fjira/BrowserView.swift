@@ -304,7 +304,7 @@ struct BrowserView: View {
                                 .frame(width: 20, height: 20).clipShape(Circle())
                                 .accessibilityHidden(true)
                         } else {
-                            Image(systemName: "person.crop.circle").foregroundStyle(.secondary)
+                            Image(systemName: PersonAvatarPlaceholder.symbolName).foregroundStyle(.secondary)
                                 .frame(width: 20, height: 20).accessibilityHidden(true)
                         }
                         Text(issue.assignee).lineLimit(1).help(issue.assignee)
