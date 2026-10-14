@@ -68,11 +68,13 @@ requests, loaded from Jira's read-only `/rest/api/2/issue/{id}/remotelink` endpo
 External links open in your browser. Their complete responses are cached for offline
 use; failed link refreshes preserve downloaded links and do not block issue content.
 Related issues open in the same viewer. Additional comments load in pages.
-Attachment files and remote inline images are not downloaded yet; open the issue
+Attachment files and inline images hosted outside Jira are not downloaded; open the issue
 in Jira to access them. The issue content uses one bounded, scrolling HTML view. Jira-rendered HTML is
 preferred; raw Jira wiki text has a fallback for headings, lists, tables, links,
 and code blocks. Literal newline escapes in prose become line breaks, while code
-text preserves its escapes. Components, labels, and versions use wrapping tags.
+text preserves its escapes. Extra whitespace at the start and end of descriptions
+and comments is trimmed, and repeated blank lines collapse into a single break.
+Spacing inside code is preserved. Components, labels, and versions use wrapping tags.
 Comment headers show the author name, readable date, and an avatar or initials.
 Issue metadata shows Jira's Type and Priority icons, plus compact Assignee and
 Reporter avatars beside their names. These images share the offline cache with

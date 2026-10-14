@@ -40,6 +40,31 @@ final class RenderingRegressionTests: XCTestCase {
         XCTAssertTrue(html.contains("<article class=\"comment\">"))
     }
 
+    func testRenderedTextTrimsWhitespaceAndEmptyBoundaryParagraphs() {
+        let html = "  \n<p>&nbsp;<br></p><div>  </div><p>  <br> Actual text &nbsp;<br><br> </p><p>&#160;</p>\n  "
+        XCTAssertEqual(JiraRichText.rendered(html), "<p>Actual text</p>")
+        XCTAssertEqual(JiraRichText.rendered(" \n Text \n "), "Text")
+        XCTAssertEqual(JiraRichText.rendered("<p>&nbsp;<br></p>"), "")
+    }
+
+    func testRepeatedBlankLinesBecomeOneBreak() {
+        XCTAssertEqual(JiraRichText.rendered("<p>First\n\n\nSecond</p>"), "<p>First<br>Second</p>")
+        XCTAssertEqual(JiraRichText.rendered("<p>First<br><br /> &nbsp;<br>Second</p>"), "<p>First<br>Second</p>")
+        XCTAssertEqual(JiraRichText.rendered("<p>First</p><p><br></p><p>&nbsp;</p><br><br><p>Second</p>"),
+                       "<p>First</p><p>Second</p>")
+        XCTAssertEqual(JiraRichText.wiki("\n First\n\n\nSecond \n"), "<p>First</p><p>Second</p>")
+    }
+
+    func testWhitespaceNormalizationPreservesCodeAndInteriorSpaces() {
+        let code = "<pre><code>  first\n\n\n  second  \n</code></pre>"
+        XCTAssertEqual(JiraRichText.rendered("<p><br></p>\n" + code + "\n<p>&nbsp;</p>"), code)
+        XCTAssertEqual(JiraRichText.rendered("<p>Start <code>  x\n\n  y  </code> end</p>"),
+                       "<p>Start <code>  x\n\n  y  </code> end</p>")
+        XCTAssertEqual(JiraRichText.rendered("<p>One  two</p>"), "<p>One  two</p>")
+        XCTAssertEqual(JiraRichText.rendered("<p><img class='emoticon' src='data:image/gif;base64,abc' alt=':)'></p>"),
+                       "<p><img class='emoticon' src='data:image/gif;base64,abc' alt=':)'></p>")
+    }
+
     private func fixture(description: String, rendered: Bool) async throws -> CachedIssueDetail {
         var object: [String: Any] = [
             "id": "100", "key": "EX-1", "fields": [

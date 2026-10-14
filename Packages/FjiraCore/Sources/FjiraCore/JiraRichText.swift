@@ -4,7 +4,7 @@ public enum JiraRichText {
     public static func rendered(_ html: String) -> String {
         let tokenizer = try! NSRegularExpression(pattern: #"<[^>]*>|[^<]+|<"#)
         var protectedDepth = 0
-        return tokenizer.matches(in: html, range: NSRange(html.startIndex..., in: html)).map { match in
+        let rendered = tokenizer.matches(in: html, range: NSRange(html.startIndex..., in: html)).map { match in
             let token = String(html[Range(match.range, in: html)!])
             if token.hasPrefix("<") {
                 let lowered = token.lowercased()
@@ -18,6 +18,7 @@ public enum JiraRichText {
             return literalBreaks(token).replacingOccurrences(of: "\r\n", with: "\n")
                 .replacingOccurrences(of: "\r", with: "\n").replacingOccurrences(of: "\n", with: "<br>\n")
         }.joined()
+        return normalizeSpacing(rendered)
     }
 
     public static func wiki(_ source: String) -> String {
@@ -69,6 +70,46 @@ public enum JiraRichText {
         }
         closeList(); closeTable()
         return output
+    }
+
+    private static let codeBlocks = try! NSRegularExpression(
+        pattern: #"<(pre|code)\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?</\1\s*>"#, options: .caseInsensitive)
+
+    private static let spacingRules: [(NSRegularExpression, String)] = {
+        let blank = #"(?:\s|&nbsp;|&#(?:0*160|0*32|0*10|0*13);|&#x(?:0*a0|0*20|0*a|0*d);)"#
+        let br = #"<br\b(?:[^>"']|"[^"]*"|'[^']*')*>"#
+        let rules = [
+            (#"<(p|div)\b(?:[^>"']|"[^"]*"|'[^']*')*>(?:"# + blank + "|" + br + #")*</\1\s*>"#, ""),
+            ("(?:" + br + blank + "*){2,}", "<br>"),
+            (#"(</(?:p|div)\s*>)(?:"# + blank + "|" + br + #")+(<(?:p|div)\b)"#, "$1$2"),
+            (#"(<(?:p|div)\b(?:[^>"']|"[^"]*"|'[^']*')*>)(?:"# + blank + "|" + br + ")+", "$1"),
+            ("(?:" + blank + "|" + br + #")+(?=</(?:p|div)\s*>)"#, ""),
+            ("^(?:" + blank + "|" + br + ")+|(?:" + blank + "|" + br + ")+$", "")
+        ]
+        return rules.map { (try! NSRegularExpression(pattern: $0.0, options: .caseInsensitive), $0.1) }
+    }()
+
+    private static func normalizeSpacing(_ html: String) -> String {
+        // Keep preformatted and inline code out of prose whitespace normalization.
+        var text = html
+        var preserved: [(String, String)] = []
+        let prefix = "FJIRA-CODE-" + UUID().uuidString + "-"
+        for (index, match) in codeBlocks.matches(in: html, range: NSRange(html.startIndex..., in: html)).enumerated().reversed() {
+            guard let range = Range(match.range, in: html) else { continue }
+            let token = prefix + String(index)
+            preserved.append((token, String(html[range])))
+            text.replaceSubrange(range, with: token)
+        }
+        // Repeat to remove nested empty wrappers exposed by the previous pass.
+        var previous: String
+        repeat {
+            previous = text
+            for (rule, replacement) in spacingRules {
+                text = rule.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: replacement)
+            }
+        } while text != previous
+        for (token, code) in preserved { text = text.replacingOccurrences(of: token, with: code) }
+        return text
     }
 
     private static func inline(_ text: String) -> String {
