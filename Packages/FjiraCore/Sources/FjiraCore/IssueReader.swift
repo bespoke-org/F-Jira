@@ -12,6 +12,23 @@ public final class IssueReader {
     public private(set) var errorMessage: String?
     public private(set) var avatars: [String: CachedAvatar] = [:]
 
+    private var navigation = NavigationHistory<IssueDestination>(initial: .list)
+    public var canGoBack: Bool { navigation.canGoBack }
+    public var canGoForward: Bool { navigation.canGoForward }
+
+    private enum IssueDestination: Equatable {
+        case list
+        case issue(JiraIssue)
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            switch (lhs, rhs) {
+            case (.list, .list): true
+            case (.issue(let first), .issue(let second)): first.key == second.key
+            default: false
+            }
+        }
+    }
+
     @ObservationIgnored private let site: JiraSite
     @ObservationIgnored private let account: String
     @ObservationIgnored private let cache: ConnectionCache
@@ -43,12 +60,42 @@ public final class IssueReader {
     }
 
     public func open(_ issue: JiraIssue) {
+        navigation.visit(.issue(issue))
+        show(issue)
+    }
+
+    public func goBack() {
+        guard let destination = navigation.goBack() else { return }
+        show(destination)
+    }
+
+    public func goForward() {
+        guard let destination = navigation.goForward() else { return }
+        show(destination)
+    }
+
+    public func resetNavigation() {
+        navigation.reset(to: .list)
+        clearSelection()
+    }
+
+    private func show(_ destination: IssueDestination) {
+        switch destination {
+        case .list: clearSelection()
+        case .issue(let issue): show(issue)
+        }
+    }
+
+    private func show(_ issue: JiraIssue) {
         cancel()
         selection = issue
         isOffline = false
         let saved = recentIssues[issue.id] ?? (issue.id == issue.key
             ? recentIssues.values.first { $0.detail.issue.key == issue.key } : nil)
-        if let saved { selection = saved.detail.issue.listIssue }
+        if let saved {
+            selection = saved.detail.issue.listIssue
+            navigation.replaceCurrent(.issue(saved.detail.issue.listIssue))
+        }
         rememberImages(saved?.avatars ?? [:])
         let knownURLs = saved?.detail.imageURLs(baseURL: site.url) ?? [issue.fields.issuetype?.iconUrl, issue.fields.priority?.iconUrl,
                                                     issue.fields.assignee?.avatarURL].compactMap { $0 }
@@ -74,6 +121,11 @@ public final class IssueReader {
     }
 
     public func close() {
+        navigation.visit(.list)
+        clearSelection()
+    }
+
+    private func clearSelection() {
         cancel()
         selection = nil
         isOffline = false
@@ -176,6 +228,7 @@ public final class IssueReader {
         // Publish the image bytes before the issue so its first render is complete.
         avatars = combined
         selection = detail.issue.listIssue
+        navigation.replaceCurrent(.issue(detail.issue.listIssue))
         self.detail = detail
         rememberCurrentIssue()
     }

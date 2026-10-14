@@ -158,3 +158,12 @@ and buttons share their actions, availability, and shortcut tooltips through
 `focusedSceneValue`, so commands work from the table, search field, and issue
 body and are disabled outside the browser. To add a command, add its identity
 and presentation to `JiraCommand` and provide its action in the window context.
+
+Back and Forward use a native navigation control in the window toolbar, to the
+left of Issues, with Cmd+Left Arrow and Cmd+Right Arrow shortcuts. macOS supplies
+the toolbar glass appearance.
+They revisit issues opened from the table, Epic links, and issue links, including
+returning to the list. Opening a new destination after Back clears the forward
+branch; refreshes do not add visits. History holds up to 100 destinations for the
+current project/search and resets when that context changes or the account stops.
+Previously viewed details and images reuse the same memory and disk cache.

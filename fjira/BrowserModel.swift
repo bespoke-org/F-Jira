@@ -93,7 +93,7 @@ final class BrowserModel {
 
     func selectProject(_ id: String?, cachedInput: String? = nil, searchIfMissing: Bool = true) {
         cancelSearch()
-        issueReader.close()
+        issueReader.resetNavigation()
         selectionTask?.cancel()
         selectionID = UUID()
         let generation = selectionID
@@ -141,7 +141,7 @@ final class BrowserModel {
     }
 
     func stop() {
-        issueReader.close()
+        issueReader.resetNavigation()
         cancelSearch()
         projectTask?.cancel()
         accountAvatarTask?.cancel()

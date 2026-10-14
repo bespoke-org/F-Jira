@@ -11,6 +11,10 @@ final class JiraCommandTests: XCTestCase {
         XCTAssertEqual(JiraCommand.refresh.key, "r")
         XCTAssertEqual(JiraCommand.openInJira.help, "Open in Jira (⌘O)")
         XCTAssertEqual(JiraCommand.refresh.help, "Refresh (⌘R)")
+        XCTAssertEqual(JiraCommand.goBack.key, .leftArrow)
+        XCTAssertEqual(JiraCommand.goForward.key, .rightArrow)
+        XCTAssertEqual(JiraCommand.goBack.help, "Back (⌘←)")
+        XCTAssertEqual(JiraCommand.goForward.help, "Forward (⌘→)")
     }
 
     func testUnavailableAndDisabledCommandsDoNotExecute() {

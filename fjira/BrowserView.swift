@@ -54,6 +54,19 @@ struct BrowserView: View {
                 }
             }
             .ignoresSafeArea(.container, edges: .top)
+            .toolbar {
+                JiraNavigationControls(context: commandContext)
+                if #available(macOS 26.0, *) {
+                    ToolbarItem(placement: .navigation) {
+                        Text("Issues").font(.title2.bold())
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .navigation) {
+                        Text("Issues").font(.title2.bold())
+                    }
+                }
+            }
         }
         .navigationTitle("")
         .focusedSceneValue(\.jiraCommandContext, commandContext)
@@ -61,12 +74,11 @@ struct BrowserView: View {
         .onChange(of: model.selectedProjectID) { _, project in
             if project == nil { sidebarVisibility = .all }
         }
-        .onChange(of: selectedIssueID) { _, _ in
-            if let selectedIssue { model.issueReader.open(selectedIssue) }
-            else { model.issueReader.close() }
+        .onChange(of: model.issueReader.selection?.id) { _, _ in
+            selectedIssueID = issues.first { $0.key == model.issueReader.selection?.key }?.id
         }
-        .onChange(of: model.selectedProjectID) { _, _ in closeIssue(); sortOrder = [] }
-        .onChange(of: model.search?.query) { _, _ in closeIssue(); sortOrder = [] }
+        .onChange(of: model.selectedProjectID) { _, _ in resetIssueNavigation(); sortOrder = [] }
+        .onChange(of: model.search?.query) { _, _ in resetIssueNavigation(); sortOrder = [] }
     }
 
     private var sidebarFooter: some View {
@@ -207,8 +219,7 @@ struct BrowserView: View {
     private var issueList: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Issues").font(.title2.bold())
+                HStack(spacing: 12) {
                     Spacer()
                     Menu("Downloaded searches", systemImage: "clock") {
                         ForEach(model.history, id: \.query) { saved in
@@ -219,7 +230,6 @@ struct BrowserView: View {
                     }
                     .disabled(model.history.isEmpty || model.isLoadingCache)
                 }
-                .padding(.leading, sidebarVisibility == .detailOnly ? 128 : 0)
                 HStack {
                     TextField("Search titles and descriptions, or enter JQL", text: $model.queryText)
                         .textFieldStyle(.roundedBorder)
@@ -255,7 +265,18 @@ struct BrowserView: View {
             }
             .padding(16)
             Divider()
-            Table(issues, selection: $selectedIssueID, sortOrder: $sortOrder) {
+            Table(issues, selection: Binding(
+                get: { selectedIssueID },
+                set: { id in
+                    guard id != selectedIssueID else { return }
+                    selectedIssueID = id
+                    if let issue = issues.first(where: { $0.id == id }) {
+                        if model.issueReader.selection?.key != issue.key { model.issueReader.open(issue) }
+                    } else if model.issueReader.selection != nil {
+                        model.issueReader.close()
+                    }
+                }
+            ), sortOrder: $sortOrder) {
                 TableColumn("Key", value: \.key).width(min: 90, ideal: 110)
                 TableColumn("Summary", value: \.summary) { issue in
                     HStack(spacing: 6) {
@@ -348,6 +369,11 @@ struct BrowserView: View {
         }
     }
 
+    private func resetIssueNavigation() {
+        selectedIssueID = nil
+        model.issueReader.resetNavigation()
+    }
+
     private func closeIssue() {
         selectedIssueID = nil
         model.issueReader.close()
@@ -358,6 +384,8 @@ struct BrowserView: View {
         let canSearch = model.selectedProject != nil && !model.isRestoring
             && !model.isLoadingCache && !model.isSearching
         return JiraCommandContext([
+            .goBack: JiraCommandAction(isEnabled: model.issueReader.canGoBack) { model.issueReader.goBack() },
+            .goForward: JiraCommandAction(isEnabled: model.issueReader.canGoForward) { model.issueReader.goForward() },
             .openInJira: JiraCommandAction(isEnabled: currentIssue != nil) {
                 guard let currentIssue else { return }
                 NSWorkspace.shared.open(model.connection.site.url.appending(path: "browse/\(currentIssue.key)"))

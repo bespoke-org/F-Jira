@@ -2,11 +2,13 @@ import SwiftUI
 
 /// Command identity and presentation live here; each window supplies its own actions.
 public enum JiraCommand: String, CaseIterable, Identifiable {
-    case openInJira, refresh, search
+    case goBack, goForward, openInJira, refresh, search
 
     public var id: Self { self }
     public var title: String {
         switch self {
+        case .goBack: "Back"
+        case .goForward: "Forward"
         case .openInJira: "Open in Jira"
         case .refresh: "Refresh"
         case .search: "Search"
@@ -14,6 +16,8 @@ public enum JiraCommand: String, CaseIterable, Identifiable {
     }
     public var symbol: String {
         switch self {
+        case .goBack: "chevron.left"
+        case .goForward: "chevron.right"
         case .openInJira: "arrow.up.right.square"
         case .refresh: "arrow.clockwise"
         case .search: "magnifyingglass"
@@ -21,6 +25,8 @@ public enum JiraCommand: String, CaseIterable, Identifiable {
     }
     public var key: KeyEquivalent {
         switch self {
+        case .goBack: .leftArrow
+        case .goForward: .rightArrow
         case .openInJira: "o"
         case .refresh: "r"
         case .search: .return
@@ -28,7 +34,14 @@ public enum JiraCommand: String, CaseIterable, Identifiable {
     }
     public var modifiers: EventModifiers { .command }
     public var shortcutLabel: String {
-        "⌘" + (key == .return ? "↩" : String(key.character).uppercased())
+        let label: String
+        switch key {
+        case .leftArrow: label = "←"
+        case .rightArrow: label = "→"
+        case .return: label = "↩"
+        default: label = String(key.character).uppercased()
+        }
+        return "⌘" + label
     }
     public var help: String { "\(title) (\(shortcutLabel))" }
 }
