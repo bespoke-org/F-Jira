@@ -1,11 +1,11 @@
-# fjira
+# F Jira
 
 A native macOS client for on-premises Jira, written in Swift and SwiftUI.
 
 ## Connection
 
 Enter your HTTPS Jira base URL, including a context path such as `/jira` if used,
-and a personal access token created in your Jira profile. fjira verifies it with
+and a personal access token created in your Jira profile. F Jira verifies it with
 read-only requests to `/rest/api/2/myself` and `/rest/api/2/serverInfo`.
 Browser SSO and password authentication are not supported yet.
 
@@ -29,7 +29,7 @@ sit above the sidebar, while the issue area extends to the top of the window.
 Use the native toggle at the top of the sidebar to hide or show it.
 Type ordinary words, such as `login timeout`, to search issue titles and descriptions,
 or paste JQL such as `assignee = currentUser() ORDER BY priority DESC` into the same box.
-fjira detects JQL operators automatically and always restricts results to the selected project.
+F Jira detects JQL operators automatically and always restricts results to the selected project.
 For ambiguous inputs, `text:` forces a text search and `jql:` forces JQL.
 An empty search shows all issues, ordered by updated date and key.
 Text searches match words in either the title or description using
@@ -39,7 +39,11 @@ Punctuation is escaped and words are case-insensitive. Search uses Jira's read-o
 
 Results are downloaded in pages of up to 50 issues. **Load more** follows the
 server's actual page size. Table headers sort downloaded rows; JQL ordering
-controls the complete result set. Select a row to copy its key or open it in Jira.
+controls the complete result set. Each title is preceded by its Jira task-type icon,
+with the type name available on hover. Assignee names have circular profile images,
+and priorities show their Jira icons. Images are loaded once per URL and reused
+across rows and issue details; saved results include cached images on their first
+render. Select a row to copy its key or open it in Jira.
 
 Every successful search is available in **Downloaded searches**, with its original
 order, fetched pages, total count, and timestamp. Restarting restores the selected
@@ -67,7 +71,13 @@ searches and details recover categories from their saved responses without a ref
 requests, loaded from Jira's read-only `/rest/api/2/issue/{id}/remotelink` endpoint.
 External links open in your browser. Their complete responses are cached for offline
 use; failed link refreshes preserve downloaded links and do not block issue content.
-Related issues open in the same viewer. Additional comments load in pages.
+Related issues open in the same viewer. **Epic Link** appears in metadata when an
+issue belongs to an epic; clicking it opens the epic in the same viewer. The field
+is discovered from Jira's schema, with its name used for older cached responses,
+so it supports instance-specific custom-field IDs. Epic links and viewed epic
+contents remain available offline. See
+[Jira's custom-field metadata](https://developer.atlassian.com/server/jira/platform/jira-rest-api-examples/).
+Additional comments load in pages.
 Attachment files and inline images hosted outside Jira are not downloaded; open the issue
 in Jira to access them. The issue content uses one bounded, scrolling HTML view. Jira-rendered HTML is
 preferred; raw Jira wiki text has a fallback for headings, lists, tables, links,
@@ -76,8 +86,10 @@ text preserves its escapes. Extra whitespace at the start and end of description
 and comments is trimmed, and repeated blank lines collapse into a single break.
 Spacing inside code is preserved. Components, labels, and versions use wrapping tags.
 Comment headers show the author name, readable date, and an avatar or initials.
-Issue metadata shows Jira's Type and Priority icons, plus compact Assignee and
-Reporter avatars beside their names. These images share the offline cache with
+Issue metadata shows Jira's Type and Priority icons. Below Priority, Assignee,
+Implementer, and Reporter appear together with compact avatars beside their names.
+Implementer is discovered by its custom-field name, including in older cached
+responses; an empty Implementer field shows Unassigned. These images share the offline cache with
 comment avatars; static SVG icons are supported as well as raster images.
 Images are also shared in memory by URL across issues. Cached details and their
 image bytes are read together and published as one state, so reused icons appear
@@ -125,3 +137,8 @@ instead of HTML. The rendering regressions check for this failure.
 xcodebuild -project fjira.xcodeproj -scheme fjira -configuration Debug -destination 'platform=macOS' -derivedDataPath build build
 swift test --package-path Packages/FjiraCore
 ```
+
+The original logo is in `artwork/F Jira.png`. The rounded macOS icon with transparent
+corners is in `artwork/F Jira App Icon.png`. Run `python3 scripts/generate-app-icons.py`
+to regenerate the macOS app-icon catalog, standalone iconset, and `artwork/F Jira.icns`.
+The built application is `build/Build/Products/Debug/F Jira.app`.

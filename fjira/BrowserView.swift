@@ -257,13 +257,49 @@ struct BrowserView: View {
             Table(issues, selection: $selectedIssueID, sortOrder: $sortOrder) {
                 TableColumn("Key", value: \.key).width(min: 90, ideal: 110)
                 TableColumn("Summary", value: \.summary) { issue in
-                    Text(issue.summary).help(issue.summary)
+                    HStack(spacing: 6) {
+                        if let url = issue.fields.issuetype?.iconUrl,
+                           let image = model.tableImages[url.absoluteString] {
+                            Image(nsImage: image).resizable().scaledToFit()
+                                .frame(width: 16, height: 16)
+                                .help(issue.issueType).accessibilityLabel(issue.issueType)
+                        } else {
+                            Image(systemName: "square.dashed").foregroundStyle(.secondary)
+                                .frame(width: 16, height: 16)
+                                .help(issue.issueType).accessibilityLabel(issue.issueType)
+                        }
+                        Text(issue.summary).lineLimit(1).help(issue.summary)
+                    }
                 }.width(min: 220, ideal: 380)
                 TableColumn("Status", value: \.status) { issue in
                     StatusPill(name: issue.status, tone: issue.statusTone)
                 }.width(min: 100, ideal: 140)
-                TableColumn("Assignee", value: \.assignee).width(min: 110, ideal: 150)
-                TableColumn("Priority", value: \.priority).width(min: 75, ideal: 90)
+                TableColumn("Assignee", value: \.assignee) { issue in
+                    HStack(spacing: 6) {
+                        if let url = issue.fields.assignee?.avatarURL,
+                           let image = model.tableImages[url.absoluteString] {
+                            Image(nsImage: image).resizable().scaledToFill()
+                                .frame(width: 20, height: 20).clipShape(Circle())
+                                .accessibilityHidden(true)
+                        } else {
+                            Image(systemName: "person.crop.circle").foregroundStyle(.secondary)
+                                .frame(width: 20, height: 20).accessibilityHidden(true)
+                        }
+                        Text(issue.assignee).lineLimit(1).help(issue.assignee)
+                    }
+                }.width(min: 110, ideal: 150)
+                TableColumn("Priority", value: \.priority) { issue in
+                    HStack(spacing: 6) {
+                        if let url = issue.fields.priority?.iconUrl,
+                           let image = model.tableImages[url.absoluteString] {
+                            Image(nsImage: image).resizable().scaledToFit()
+                                .frame(width: 16, height: 16).accessibilityHidden(true)
+                        } else {
+                            Color.clear.frame(width: 16, height: 16)
+                        }
+                        Text(issue.priority).lineLimit(1).help(issue.priority)
+                    }
+                }.width(min: 90, ideal: 115)
                 TableColumn("Updated", value: \.updated) { issue in
                     Text(issue.updated == .distantPast ? "—" : issue.updated.formatted(date: .abbreviated, time: .shortened))
                 }.width(min: 140, ideal: 160)

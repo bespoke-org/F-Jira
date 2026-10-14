@@ -65,6 +65,10 @@ public struct IssueDetailView: View {
     }
 
     private func handleAction(_ url: URL) {
+        if url.host == "epic", url.lastPathComponent == reader.detail?.issue.epicLink?.key {
+            reader.openEpic()
+            return
+        }
         if url.host == "comments" { reader.loadMoreComments(); return }
         guard url.host == "issue", let fields = reader.detail?.issue.fields else { return }
         let candidates = (fields.subtasks ?? []) + (fields.issuelinks ?? []).compactMap(\.relatedIssue)

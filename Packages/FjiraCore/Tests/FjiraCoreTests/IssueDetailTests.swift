@@ -36,7 +36,7 @@ final class IssueDetailTests: XCTestCase {
         XCTAssertEqual(request.httpMethod, "GET")
         XCTAssertEqual(request.url?.path, "/jira/rest/api/2/issue/100")
         let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems
-        XCTAssertEqual(query?.first { $0.name == "expand" }?.value, "renderedFields,names")
+        XCTAssertEqual(query?.first { $0.name == "expand" }?.value, "renderedFields,names,schema")
         XCTAssertNil(request.httpBody)
     }
 

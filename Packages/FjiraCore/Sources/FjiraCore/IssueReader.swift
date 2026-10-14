@@ -46,7 +46,9 @@ public final class IssueReader {
         cancel()
         selection = issue
         isOffline = false
-        let saved = recentIssues[issue.id]
+        let saved = recentIssues[issue.id] ?? (issue.id == issue.key
+            ? recentIssues.values.first { $0.detail.issue.key == issue.key } : nil)
+        if let saved { selection = saved.detail.issue.listIssue }
         rememberImages(saved?.avatars ?? [:])
         let knownURLs = saved?.detail.imageURLs(baseURL: site.url) ?? [issue.fields.issuetype?.iconUrl, issue.fields.priority?.iconUrl,
                                                     issue.fields.assignee?.avatarURL].compactMap { $0 }
@@ -54,6 +56,21 @@ public final class IssueReader {
         detail = saved?.detail
         rememberCurrentIssue()
         refresh()
+    }
+
+    public func reuseImages(_ images: [String: CachedAvatar]) {
+        guard !images.isEmpty else { return }
+        rememberImages(images)
+        guard let detail else { return }
+        let urls = detail.imageURLs(baseURL: site.url)
+        guard urls.contains(where: { images[$0.absoluteString] != nil }) else { return }
+        avatars = imagesInMemory(for: urls, cached: avatars)
+        rememberCurrentIssue()
+    }
+
+    public func openEpic() {
+        guard let epic = detail?.issue.epicLink else { return }
+        open(epic.listIssue)
     }
 
     public func close() {
@@ -86,7 +103,8 @@ public final class IssueReader {
                 let result = try await client.issue(site: site, token: credentials(), id: selection.id)
                 try Task.checkCancellation()
                 guard requestID == generation else { return }
-                guard result.issue.id == selection.id else { throw JiraError.invalidResponse }
+                guard result.issue.id == selection.id
+                        || (selection.id == selection.key && result.issue.key == selection.key) else { throw JiraError.invalidResponse }
                 try await cache.saveIssue(result, site: site.identifier, account: account)
                 let updated = try await cache.loadIssuePresentation(site: site.identifier, account: account, id: selection.id)
                 try Task.checkCancellation()
@@ -157,6 +175,7 @@ public final class IssueReader {
         rememberImages(combined)
         // Publish the image bytes before the issue so its first render is complete.
         avatars = combined
+        selection = detail.issue.listIssue
         self.detail = detail
         rememberCurrentIssue()
     }

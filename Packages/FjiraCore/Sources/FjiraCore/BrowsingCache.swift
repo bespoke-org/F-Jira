@@ -27,12 +27,20 @@ extension ConnectionCache {
         }
     }
 
+    public func loadSearchPresentation(site: String, account: String, query: ProjectQuery) throws
+        -> (search: CachedSearch, images: [String: CachedAvatar])? {
+        try database.read { db in
+            guard let search = try Self.search(in: db, site: site, account: account, query: query) else { return nil }
+            return (search, try Self.cachedImages(in: db, site: site, account: account, urls: search.tableImageURLs))
+        }
+    }
+
     public func recentSearches(site: String, account: String, project: String) throws -> [CachedSearch] {
         try database.read { db in
             try Data.fetchAll(db,
                 sql: "SELECT snapshot FROM search_snapshot WHERE site = ? AND account = ? AND project = ?",
                 arguments: [site, account, project])
-                .map { try JSONDecoder().decode(CachedSearch.self, from: $0).restoringStatusCategories }
+                .map { try JSONDecoder().decode(CachedSearch.self, from: $0).restoringMetadata }
                 .sorted { $0.fetchedAt > $1.fetchedAt }
         }
     }
@@ -106,6 +114,6 @@ extension ConnectionCache {
         guard let data = try Data.fetchOne(db,
             sql: "SELECT snapshot FROM search_snapshot WHERE site = ? AND account = ? AND project = ? AND input = ?",
             arguments: [site, account, query.projectID, query.input]) else { return nil }
-        return try JSONDecoder().decode(CachedSearch.self, from: data).restoringStatusCategories
+        return try JSONDecoder().decode(CachedSearch.self, from: data).restoringMetadata
     }
 }

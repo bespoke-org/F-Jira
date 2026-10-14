@@ -26,22 +26,7 @@ extension ConnectionCache {
         try database.read { db in
             guard let detail = try Self.readDetail(in: db, site: site, account: account, id: id) else { return nil }
             let urls = URL(string: site).map { detail.imageURLs(baseURL: $0) } ?? detail.imageURLs
-            var images: [String: CachedAvatar] = [:]
-            for offset in stride(from: 0, to: urls.count, by: 200) {
-                let resources = urls[offset..<min(offset + 200, urls.count)].map { "avatar:\($0.absoluteString)" }
-                let placeholders = Array(repeating: "?", count: resources.count).joined(separator: ",")
-                let rows = try Row.fetchAll(db, sql: """
-                    SELECT resource, payload FROM response_cache
-                    WHERE site = ? AND account = ? AND resource IN (\(placeholders))
-                    """, arguments: StatementArguments([site, account] + resources))
-                for row in rows {
-                    let resource: String = row["resource"]
-                    let data: Data = row["payload"]
-                    if let image = try? JSONDecoder().decode(CachedAvatar.self, from: data) {
-                        images[String(resource.dropFirst("avatar:".count))] = image
-                    }
-                }
-            }
+            let images = try Self.cachedImages(in: db, site: site, account: account, urls: urls)
             return (detail, images)
         }
     }
@@ -64,19 +49,32 @@ extension ConnectionCache {
     }
 
     static func readDetail(in db: Database, site: String, account: String, id: String) throws -> CachedIssueDetail? {
-        guard let data = try Data.fetchOne(db,
+        var data = try Data.fetchOne(db,
             sql: "SELECT payload FROM response_cache WHERE site = ? AND account = ? AND resource = ?",
-            arguments: [site, account, "issue-detail:\(id)"]) else { return nil }
+            arguments: [site, account, "issue-detail:\(id)"])
+        if data == nil, id.contains("-") {
+            data = try Data.fetchOne(db, sql: """
+                SELECT payload FROM response_cache
+                WHERE site = ? AND account = ? AND resource LIKE 'issue-detail:%'
+                AND json_extract(CAST(payload AS TEXT), '$.issue.key') = ?
+                LIMIT 1
+                """, arguments: [site, account, id])
+        }
+        guard let data else { return nil }
         let saved = try JSONDecoder().decode(CachedIssueDetail.self, from: data)
-        // Older projections omitted icon URLs and status categories, but the full response kept them.
+        // Recover metadata added after the original snapshot was saved from the complete response.
         // Recover the immutable issue fields without losing cached pages or remote links.
         guard saved.issue.fields.issuetype?.iconUrl == nil || saved.issue.fields.priority?.iconUrl == nil
-                || saved.issue.fields.status?.statusCategory == nil,
+                || saved.issue.fields.status?.statusCategory == nil || saved.issue.epicLink == nil
+                || !saved.issue.hasImplementerField || saved.issue.implementer == nil,
               let original = try? JSONDecoder().decode(JiraIssueDetail.self, from: saved.response),
               original.id == saved.issue.id, original.key == saved.issue.key,
               (saved.issue.fields.issuetype?.iconUrl == nil && original.fields.issuetype?.iconUrl != nil)
                 || (saved.issue.fields.priority?.iconUrl == nil && original.fields.priority?.iconUrl != nil)
-                || (saved.issue.fields.status?.statusCategory == nil && original.fields.status?.statusCategory != nil) else { return saved }
+                || (saved.issue.fields.status?.statusCategory == nil && original.fields.status?.statusCategory != nil)
+                || (saved.issue.epicLink == nil && original.epicLink != nil)
+                || (!saved.issue.hasImplementerField && original.hasImplementerField)
+                || (saved.issue.implementer == nil && original.implementer != nil) else { return saved }
         var recovered = CachedIssueDetail(issue: original, response: saved.response, fetchedAt: saved.fetchedAt,
                                           generation: saved.generation, commentPages: saved.commentPages,
                                           previousComments: saved.previousComments)

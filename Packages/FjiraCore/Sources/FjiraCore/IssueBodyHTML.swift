@@ -97,10 +97,17 @@ public enum IssueBodyHTML {
         var rows = [
             ("Status", "<span class=\"status-pill status-\(issue.statusTone.rawValue)\" title=\"\(escape(issue.status))\"><span>\(escape(issue.status))</span></span>"),
             ("Type", iconValue(issue.issueType, url: fields.issuetype?.iconUrl, images: images)),
-            ("Assignee", personValue(fields.assignee, fallback: "Unassigned", images: images)),
-            ("Priority", iconValue(issue.priority, url: fields.priority?.iconUrl, images: images))
+            ("Priority", iconValue(issue.priority, url: fields.priority?.iconUrl, images: images)),
+            ("Assignee", personValue(fields.assignee, fallback: "Unassigned", images: images))
         ]
+        if detail.issue.hasImplementerField {
+            rows.append(("Implementer", personValue(detail.issue.implementer, fallback: "Unassigned", images: images)))
+        }
         if let reporter = fields.reporter { rows.append(("Reporter", personValue(reporter, fallback: "Unknown", images: images))) }
+        if let epic = detail.issue.epicLink {
+            let title = epic.summary.map { "\(epic.key): \($0)" } ?? epic.key
+            rows.append(("Epic Link", "<a href=\"fjira://epic/\(escape(epic.key))\">\(escape(title))</a>"))
+        }
         if let created = fields.created { rows.append(("Created", escape(date(created)))) }
         if let updated = fields.updated { rows.append(("Updated", escape(date(updated)))) }
         if let due = fields.duedate { rows.append(("Due", escape(due))) }

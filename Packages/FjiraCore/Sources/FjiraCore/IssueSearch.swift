@@ -184,15 +184,23 @@ public struct CachedSearch: Codable, Sendable {
     public let generation: UUID
     public var pages: [CachedIssuePage]
 
-    var restoringStatusCategories: CachedSearch {
+    var restoringMetadata: CachedSearch {
         var restored = self
         restored.pages = pages.map { cached in
-            guard cached.page.issues.contains(where: { $0.fields.status?.statusCategory == nil }),
+            guard cached.page.issues.contains(where: {
+                $0.fields.status?.statusCategory == nil || $0.fields.issuetype?.iconUrl == nil
+                    || $0.fields.priority?.iconUrl == nil || $0.fields.assignee?.avatarURL == nil
+            }),
                   let original = try? JSONDecoder().decode(IssuePage.self, from: cached.response),
                   original.startAt == cached.page.startAt,
                   original.issues.map(\.id) == cached.page.issues.map(\.id),
                   original.issues.map(\.key) == cached.page.issues.map(\.key),
-                  original.issues.contains(where: { $0.fields.status?.statusCategory != nil }) else { return cached }
+                  zip(cached.page.issues, original.issues).contains(where: { old, new in
+                      (old.fields.status?.statusCategory == nil && new.fields.status?.statusCategory != nil)
+                        || (old.fields.issuetype?.iconUrl == nil && new.fields.issuetype?.iconUrl != nil)
+                        || (old.fields.priority?.iconUrl == nil && new.fields.priority?.iconUrl != nil)
+                        || (old.fields.assignee?.avatarURL == nil && new.fields.assignee?.avatarURL != nil)
+                  }) else { return cached }
             return CachedIssuePage(page: original, response: cached.response, fetchedAt: cached.fetchedAt)
         }
         return restored
@@ -201,6 +209,15 @@ public struct CachedSearch: Codable, Sendable {
     public var issues: [JiraIssue] {
         var seen = Set<String>()
         return pages.flatMap(\.page.issues).filter { seen.insert($0.id).inserted }
+    }
+    public var issueTypeIconURLs: [URL] {
+        var seen = Set<URL>()
+        return issues.compactMap { $0.fields.issuetype?.iconUrl }.filter { seen.insert($0).inserted }
+    }
+    public var tableImageURLs: [URL] {
+        var seen = Set<URL>()
+        let metadata = issueTypeIconURLs + issues.compactMap { $0.fields.priority?.iconUrl }
+        return (metadata + issues.compactMap { $0.fields.assignee?.avatarURL }).filter { seen.insert($0).inserted }
     }
     public var total: Int? { pages.last?.page.total }
     public var nextStartAt: Int { pages.last.map { $0.page.startAt + $0.page.issues.count } ?? 0 }

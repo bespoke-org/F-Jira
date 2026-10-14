@@ -1,3 +1,4 @@
+import AppKit
 import FjiraCore
 import Foundation
 import Observation
@@ -21,6 +22,11 @@ final class BrowserModel {
     private(set) var projectError: String?
     private(set) var accountAvatar: CachedAvatar?
     private(set) var projectAvatars: [URL: CachedAvatar] = [:]
+    private(set) var tableImages: [String: NSImage] = [:]
+
+    @ObservationIgnored private var tableImageTask: Task<Void, Never>?
+    @ObservationIgnored private var attemptedTableImages = Set<URL>()
+    @ObservationIgnored private var tableImageDates: [String: Date] = [:]
 
     @ObservationIgnored private let cache: ConnectionCache
     @ObservationIgnored private let client: JiraClient
@@ -140,6 +146,7 @@ final class BrowserModel {
         projectTask?.cancel()
         accountAvatarTask?.cancel()
         for task in projectAvatarTasks.values { task.cancel() }
+        tableImageTask?.cancel()
         selectionTask?.cancel()
         selectionID = UUID()
     }
@@ -197,10 +204,10 @@ final class BrowserModel {
             defer { if requestID == generation { isSearching = false; searchTask = nil } }
             do {
                 if !append {
-                    let saved = try await cache.loadSearch(site: site, account: account, query: query)
+                    let saved = try await cache.loadSearchPresentation(site: site, account: account, query: query)
                     try Task.checkCancellation()
                     guard requestID == generation else { return }
-                    search = saved
+                    presentSearch(saved)
                 }
                 let page = try await client.search(
                     site: connection.site, token: credentials(), query: query,
@@ -212,11 +219,11 @@ final class BrowserModel {
                     page, site: site, account: account, query: query,
                     expectedGeneration: append ? prior?.generation : nil
                 )
-                let saved = try await cache.loadSearch(site: site, account: account, query: query)
+                let saved = try await cache.loadSearchPresentation(site: site, account: account, query: query)
                 let recent = try await cache.recentSearches(site: site, account: account, project: query.projectID)
                 try Task.checkCancellation()
                 guard requestID == generation else { return }
-                search = saved
+                presentSearch(saved)
                 history = recent
                 try await cache.saveSelection(site: site, account: account, project: query.projectID, input: query.input)
             } catch is CancellationError { }
@@ -229,13 +236,68 @@ final class BrowserModel {
         let recent = try await cache.recentSearches(site: site, account: account, project: id)
         let text = input ?? recent.first?.query.input ?? ""
         let query = try ProjectQuery(projectID: id, input: text)
-        let saved = try await cache.loadSearch(site: site, account: account, query: query)
+        let saved = try await cache.loadSearchPresentation(site: site, account: account, query: query)
         try Task.checkCancellation()
         guard generation == nil || selectionID == generation else { return }
         history = recent
         queryText = text
-        search = saved
+        presentSearch(saved)
         try await cache.saveSelection(site: site, account: account, project: id, input: text)
+    }
+
+    private func presentSearch(_ presentation: (search: CachedSearch, images: [String: CachedAvatar])?) {
+        applyTableImages(presentation?.images ?? [:])
+        search = presentation?.search
+        attemptedTableImages = []
+        // Start type/priority icons first, and limit concurrent image requests for large assignee lists.
+        if tableImageTask == nil {
+            tableImageTask = Task {
+                defer { tableImageTask = nil }
+                var credential: String?
+                while !Task.isCancelled {
+                    let missing = (search?.tableImageURLs ?? []).filter { url in
+                        tableImageDates[url.absoluteString].map { Date().timeIntervalSince($0) >= 86_400 } ?? true
+                    }
+                    let pending = missing.filter { !attemptedTableImages.contains($0) }
+                    guard !pending.isEmpty else { return }
+                    let batch = Array(pending.prefix(4))
+                    attemptedTableImages.formUnion(batch)
+                    if credential == nil { credential = try? await credentials() }
+                    guard let token = credential, !Task.isCancelled else { return }
+                    let images = await withTaskGroup(of: (String, CachedAvatar?).self, returning: [String: CachedAvatar].self) { group in
+                        for url in batch {
+                            group.addTask { [client, cache, connection] in
+                                do {
+                                    let image = try await client.avatar(site: connection.site, token: token, url: url)
+                                    try Task.checkCancellation()
+                                    try await cache.saveAvatar(image, site: connection.site.identifier,
+                                                               account: connection.user.identifier, url: url)
+                                    return (url.absoluteString, image)
+                                } catch { return (url.absoluteString, nil) }
+                            }
+                        }
+                        var result: [String: CachedAvatar] = [:]
+                        for await (url, image) in group {
+                            if let image { result[url] = image }
+                        }
+                        return result
+                    }
+                    guard !Task.isCancelled else { return }
+                    applyTableImages(images)
+                }
+            }
+        }
+    }
+
+    private func applyTableImages(_ images: [String: CachedAvatar]) {
+        issueReader.reuseImages(images)
+        for (url, cached) in images {
+            if let date = tableImageDates[url], date >= cached.fetchedAt { continue }
+            if let image = NSImage(data: cached.data) {
+                tableImages[url] = image
+                tableImageDates[url] = cached.fetchedAt
+            }
+        }
     }
 
     private func apply(_ saved: CachedProjects) {

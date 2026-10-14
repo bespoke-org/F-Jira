@@ -133,6 +133,26 @@ private final class SVGImageValidator: NSObject, XMLParserDelegate {
 }
 
 extension ConnectionCache {
+    static func cachedImages(in db: Database, site: String, account: String, urls: [URL]) throws -> [String: CachedAvatar] {
+        var images: [String: CachedAvatar] = [:]
+        for offset in stride(from: 0, to: urls.count, by: 200) {
+            let resources = urls[offset..<min(offset + 200, urls.count)].map { "avatar:\($0.absoluteString)" }
+            let placeholders = Array(repeating: "?", count: resources.count).joined(separator: ",")
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT resource, payload FROM response_cache
+                WHERE site = ? AND account = ? AND resource IN (\(placeholders))
+                """, arguments: StatementArguments([site, account] + resources))
+            for row in rows {
+                let resource: String = row["resource"]
+                let data: Data = row["payload"]
+                if let image = try? JSONDecoder().decode(CachedAvatar.self, from: data) {
+                    images[String(resource.dropFirst("avatar:".count))] = image
+                }
+            }
+        }
+        return images
+    }
+
     public func saveAvatar(_ avatar: CachedAvatar, site: String, account: String, url: URL) throws {
         try database.write { db in
             try db.execute(sql: """

@@ -5,6 +5,36 @@ public struct JiraIssueDetail: Codable, Sendable {
     public let key: String
     public let fields: Fields
     public let renderedFields: RenderedFields?
+    public let epicLink: JiraEpicLink?
+    public let implementer: JiraUser?
+    public let hasImplementerField: Bool
+
+    private enum CodingKeys: String, CodingKey { case id, key, fields, renderedFields, epicLink, implementer, hasImplementerField }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        key = try values.decode(String.self, forKey: .key)
+        fields = try values.decode(Fields.self, forKey: .fields)
+        renderedFields = try values.decodeIfPresent(RenderedFields.self, forKey: .renderedFields)
+        epicLink = (try? values.decodeIfPresent(JiraEpicLink.self, forKey: .epicLink)) ?? JiraEpicLink.decode(from: decoder)
+        let custom = Self.decodeImplementer(from: decoder)
+        implementer = (try? values.decodeIfPresent(JiraUser.self, forKey: .implementer)) ?? custom.user
+        hasImplementerField = (try? values.decode(Bool.self, forKey: .hasImplementerField))
+            ?? (custom.isPresent || implementer != nil)
+    }
+
+    private static func decodeImplementer(from decoder: any Decoder) -> (user: JiraUser?, isPresent: Bool) {
+        guard let root = try? decoder.container(keyedBy: FieldKey.self),
+              let names = try? root.decode([String: String].self, forKey: FieldKey("names")),
+              let fields = try? root.nestedContainer(keyedBy: FieldKey.self, forKey: FieldKey("fields")) else { return (nil, false) }
+        let keys = names.keys.filter {
+            names[$0]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "implementer"
+                && fields.contains(FieldKey($0))
+        }.sorted()
+        let user = keys.lazy.compactMap { try? fields.decode(JiraUser.self, forKey: FieldKey($0)) }.first
+        return (user, !keys.isEmpty)
+    }
 
     public struct Fields: Codable, Sendable {
         public let summary: String?
@@ -126,7 +156,7 @@ public struct CachedIssueDetail: Codable, Sendable {
     var imageURLs: [URL] {
         let fields = issue.fields
         let metadata = [fields.issuetype?.iconUrl, fields.priority?.iconUrl,
-                        fields.assignee?.avatarURL, fields.reporter?.avatarURL].compactMap { $0 }
+                        fields.assignee?.avatarURL, issue.implementer?.avatarURL, fields.reporter?.avatarURL].compactMap { $0 }
         var seen = Set<URL>()
         return (metadata + comments.compactMap { $0.author?.avatarURL }).filter { seen.insert($0).inserted }
     }
@@ -161,7 +191,7 @@ extension JiraClient {
     public func issue(site: JiraSite, token: String, id: String) async throws -> CachedIssueDetail {
         guard Self.validIssueIdentifier(id) else { throw JiraError.invalidResponse }
         let response = try await fetch("issue/\(id)", site: site, token: token,
-                                       queryItems: [URLQueryItem(name: "expand", value: "renderedFields,names")])
+                                       queryItems: [URLQueryItem(name: "expand", value: "renderedFields,names,schema")])
         let issue: JiraIssueDetail = try decode(response)
         return CachedIssueDetail(issue: issue, response: response, fetchedAt: Date(), generation: UUID(), commentPages: [], previousComments: [])
     }
