@@ -50,7 +50,7 @@ struct BrowserView: View {
                         IssueDetailView(reader: model.issueReader, site: model.connection.site, close: closeIssue)
                     }
                 } else {
-                    ContentUnavailableView("Select a project", systemImage: "folder", description: Text("Choose a project at the bottom of the sidebar to browse its issues using JQL."))
+                    ContentUnavailableView("Select a project", systemImage: "folder", description: Text("Choose a project at the bottom of the sidebar to search its issues."))
                 }
             }
             .ignoresSafeArea(.container, edges: .top)
@@ -220,11 +220,12 @@ struct BrowserView: View {
                 }
                 .padding(.leading, sidebarVisibility == .detailOnly ? 128 : 0)
                 HStack {
-                    TextField("JQL filter, e.g. assignee = currentUser() ORDER BY updated DESC", text: $model.queryText)
+                    TextField("Search titles and descriptions, or enter JQL", text: $model.queryText)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { model.runSearch() }
+                        .help("Type words to search titles and descriptions, or paste JQL. Use text: or jql: to choose explicitly.")
                         .disabled(model.isLoadingCache)
-                    Button("Run") { model.runSearch() }
+                    Button("Search") { model.runSearch() }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.return, modifiers: .command)
                         .disabled(model.isLoadingCache)
@@ -242,9 +243,13 @@ struct BrowserView: View {
                         Label(warning, systemImage: "exclamationmark.triangle")
                             .font(.caption).foregroundStyle(.orange)
                     }
-                    Text("Results for: \(search.query.jql)")
-                        .font(.caption.monospaced()).foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                    if let text = search.query.searchText {
+                        Text(text.isEmpty ? "All issues" : "Title or description: \(text)")
+                            .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    } else {
+                        Text("Results for: \(search.query.jql)")
+                            .font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
                 }
             }
             .padding(16)
@@ -268,9 +273,9 @@ struct BrowserView: View {
                     if model.isSearching || model.isLoadingCache {
                         ProgressView("Loading issues…")
                     } else if model.search != nil {
-                        ContentUnavailableView("No matching issues", systemImage: "magnifyingglass", description: Text("Try a different JQL filter."))
+                        ContentUnavailableView("No matching issues", systemImage: "magnifyingglass", description: Text("Try different words or a JQL filter."))
                     } else {
-                        ContentUnavailableView("Run a search", systemImage: "magnifyingglass", description: Text("Run JQL online, or open a previously downloaded search."))
+                        ContentUnavailableView("Run a search", systemImage: "magnifyingglass", description: Text("Search by title, description, or JQL, or open a downloaded search."))
                     }
                 }
             }

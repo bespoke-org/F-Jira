@@ -4,6 +4,91 @@ import XCTest
 @testable import FjiraCore
 
 final class IssueSearchTests: XCTestCase {
+    func testPlainTextSearchesTitlesAndDescriptionsWithinSelectedProject() throws {
+        let query = try ProjectQuery(projectID: "10000", input: "  Login Timeout  ")
+        XCTAssertEqual(query.input, "Login Timeout")
+        XCTAssertEqual(query.searchText, "Login Timeout")
+        XCTAssertEqual(query.jql, #"project = 10000 AND (summary ~ "login timeout" OR description ~ "login timeout") ORDER BY updated DESC, key ASC"#)
+        for text in ["login is broken", "error in service", "report was wrong", "fix order by button", "can't log in", "Ошибка входа", "retry (", "AND OR NOT"] {
+            let query = try ProjectQuery(projectID: "10000", input: text)
+            XCTAssertEqual(query.searchText, text, text)
+            XCTAssertTrue(query.jql.contains("summary ~"), text)
+            XCTAssertTrue(query.jql.contains("OR description ~"), text)
+        }
+        XCTAssertTrue(try ProjectQuery(projectID: "10000", input: "AND OR NOT").jql.contains(#"summary ~ "and or not""#))
+        XCTAssertEqual(try ProjectQuery(projectID: "10000", input: "login\n\ttimeout").jql, query.jql)
+    }
+
+    func testAutomaticallyRecognizesJQLClausesAndExplicitOverrides() throws {
+        for input in [
+            "assignee = currentUser()", "priority >= High", "summary !~ timeout",
+            "(status = Open OR status = Closed)", "NOT (resolution IS EMPTY)",
+            "status in (Open, Closed)", "assignee NOT IN membersOf('team')",
+            "resolution IS NOT NULL", "status WAS Open", "assignee CHANGED AFTER -1d",
+            #""Epic Link" = EX-1"#, "cf[12345] = value", "ORDER BY updated DESC"
+        ] {
+            let query = try ProjectQuery(projectID: "10000", input: input)
+            XCTAssertNil(query.searchText, input)
+            XCTAssertTrue(query.jql.contains(input), input)
+        }
+        let forcedText = try ProjectQuery(projectID: "10000", input: "text: status = Open")
+        XCTAssertEqual(forcedText.searchText, "status = Open")
+        XCTAssertTrue(forcedText.jql.contains(#"summary ~ "status = open""#))
+        let forcedJQL = try ProjectQuery(projectID: "10000", input: "jql: customPluginClause()")
+        XCTAssertNil(forcedJQL.searchText)
+        XCTAssertEqual(forcedJQL.jql, "project = 10000 AND (customPluginClause()) ORDER BY updated DESC, key ASC")
+        XCTAssertThrowsError(try ProjectQuery(projectID: "10000", input: "jql: status in (Open"))
+    }
+
+    func testTextEscapesLuceneAndJQLSyntaxWithoutChangingSavedInput() throws {
+        let input = #"Crash (retry) "bad" C:\tmp"#
+        let query = try ProjectQuery(projectID: "10000", input: input)
+        XCTAssertEqual(query.input, input)
+        XCTAssertEqual(query.jql, #"project = 10000 AND (summary ~ "crash \\(retry\\) \\\"bad\\\" c\\:\\\\tmp" OR description ~ "crash \\(retry\\) \\\"bad\\\" c\\:\\\\tmp") ORDER BY updated DESC, key ASC"#)
+        let injected = try ProjectQuery(projectID: "10000", input: #"text: ") OR project = 20000 OR (""#)
+        XCTAssertTrue(injected.jql.hasPrefix("project = 10000 AND (summary ~ "))
+        XCTAssertTrue(injected.jql.contains(#"\\\"\\) or project = 20000 or \\(\\\""#))
+        // The generated expression must still parse as a single scoped JQL filter.
+        XCTAssertNoThrow(try ProjectQuery(projectID: "10000", input: "jql: " + injected.jql))
+    }
+
+    func testTextSearchUsesTheSameServerQueryForPagination() async throws {
+        let transport = StubTransport([(200, pageJSON(start: 2, total: 3, keys: ["EX-3"]))])
+        let query = try ProjectQuery(projectID: "10000", input: "Login Timeout")
+        _ = try await JiraClient(transport: transport).search(site: JiraSite("https://jira.example.com/jira"), token: "token", query: query, startAt: 2)
+        let requests = await transport.capturedRequests()
+        let request = try XCTUnwrap(requests.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertEqual(body["jql"] as? String, #"project = 10000 AND (summary ~ "login timeout" OR description ~ "login timeout") ORDER BY updated DESC, key ASC"#)
+        XCTAssertEqual(body["startAt"] as? Int, 2)
+        XCTAssertEqual(request.httpMethod, "POST")
+    }
+
+    func testTextSearchAndExistingJQLSurviveCacheReopening() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appending(path: "cache.sqlite").path
+        let cache = try ConnectionCache(path: path)
+        let text = try ProjectQuery(projectID: "10000", input: "Login Timeout")
+        let jql = try ProjectQuery(projectID: "10000", input: "status = Open")
+        for query in [text, jql] {
+            try await cache.savePage(page(start: 0, total: 1, keys: ["EX-1"]), site: "site", account: "alice", query: query)
+        }
+        try await cache.saveSelection(site: "site", account: "alice", project: text.projectID, input: text.input)
+        let reopened = try ConnectionCache(path: path)
+        let selection = try await reopened.loadSelection(site: "site", account: "alice")
+        let restoredQuery = try ProjectQuery(projectID: "10000", input: XCTUnwrap(selection?.input))
+        let restored = try await reopened.loadSearch(site: "site", account: "alice", query: restoredQuery)
+        XCTAssertEqual(restored?.query, text)
+        XCTAssertEqual(restored?.issues.map(\.key), ["EX-1"])
+        let oldJQL = try await reopened.loadSearch(site: "site", account: "alice", query: jql)
+        XCTAssertEqual(oldJQL?.query, jql)
+        let history = try await reopened.recentSearches(site: "site", account: "alice", project: "10000")
+        XCTAssertEqual(Set(history.map(\.query.input)), [text.input, jql.input])
+        let otherAccount = try await reopened.loadSearch(site: "site", account: "bob", query: text)
+        XCTAssertNil(otherAccount)
+    }
+
     func testScopesBooleanExpressionsAndKeepsOrderingOutsideFilter() throws {
         let query = try ProjectQuery(projectID: "10000", input: "status = Open OR assignee = currentUser() order by priority DESC")
         XCTAssertEqual(query.jql, "project = 10000 AND (status = Open OR assignee = currentUser()) order by priority DESC")

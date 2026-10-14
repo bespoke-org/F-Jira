@@ -27,10 +27,15 @@ Project responses and images are cached for offline use. The sidebar contains ap
 with the project and account controls pinned at the bottom. Native window controls
 sit above the sidebar, while the issue area extends to the top of the window.
 Use the native toggle at the top of the sidebar to hide or show it.
-Select a project to run a JQL filter; fjira always adds the project restriction.
-An empty filter shows all issues, ordered by updated date and key. You can supply
-an `ORDER BY` clause, for example `assignee = currentUser() ORDER BY priority DESC`.
-Search uses Jira's read-only `POST /rest/api/2/search` endpoint.
+Type ordinary words, such as `login timeout`, to search issue titles and descriptions,
+or paste JQL such as `assignee = currentUser() ORDER BY priority DESC` into the same box.
+fjira detects JQL operators automatically and always restricts results to the selected project.
+For ambiguous inputs, `text:` forces a text search and `jql:` forces JQL.
+An empty search shows all issues, ordered by updated date and key.
+Text searches match words in either the title or description using
+[Jira's text-search rules](https://confluence.atlassian.com/jirasoftwareserver101/search-syntax-for-text-fields-1455427017.html).
+Punctuation is escaped and words are case-insensitive. Search uses Jira's read-only
+`POST /rest/api/2/search` endpoint.
 
 Results are downloaded in pages of up to 50 issues. **Load more** follows the
 server's actual page size. Table headers sort downloaded rows; JQL ordering
@@ -38,8 +43,8 @@ controls the complete result set. Select a row to copy its key or open it in Jir
 
 Every successful search is available in **Downloaded searches**, with its original
 order, fetched pages, total count, and timestamp. Restarting restores the selected
-project and query from SQLite. Offline, cached results remain available; new JQL
-queries and additional pages require Jira. Failed requests preserve cached data.
+project and query from SQLite. Offline, cached results remain available; new searches
+and additional pages require Jira. Failed requests preserve cached data.
 Refreshing the first page replaces the current result list and invalidates older
 pagination, while downloaded issue responses remain cached for later use.
 Projects, search results, and selections are isolated by instance and account.

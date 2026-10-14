@@ -28,7 +28,15 @@ public struct ProjectQuery: Codable, Hashable, Sendable {
         guard !projectID.isEmpty, projectID.allSatisfy({ $0.isASCII && $0.isNumber }) else {
             throw SearchError.invalidProject
         }
-        let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let savedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.projectID = projectID
+        self.input = savedInput
+        guard let input = Self.jqlInput(from: savedInput) else {
+            let text = Self.plainText(from: savedInput)
+            let filter = text.isEmpty ? "" : " AND (summary ~ \(Self.textLiteral(text)) OR description ~ \(Self.textLiteral(text)))"
+            jql = "project = \(projectID)\(filter) ORDER BY updated DESC, key ASC"
+            return
+        }
         let expression = try NSRegularExpression(pattern: #"\border\s+by\b"#, options: .caseInsensitive)
         let matches = expression.matches(in: input, range: NSRange(input.startIndex..., in: input))
         let ranges = matches.compactMap { Range($0.range, in: input) }
@@ -66,9 +74,45 @@ public struct ProjectQuery: Codable, Hashable, Sendable {
             filter = input
             ordering = "ORDER BY updated DESC, key ASC"
         }
-        self.projectID = projectID
-        self.input = input
         jql = "project = \(projectID)" + (filter.isEmpty ? "" : " AND (\(filter))") + " \(ordering)"
+    }
+
+    /// The original text for a normal search, or nil when the input is JQL.
+    public var searchText: String? {
+        Self.jqlInput(from: input) == nil ? Self.plainText(from: input) : nil
+    }
+
+    private static func plainText(from input: String) -> String {
+        let text = input.lowercased().hasPrefix("text:") ? String(input.dropFirst(5)) : input
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func jqlInput(from input: String) -> String? {
+        if input.lowercased().hasPrefix("text:") { return nil }
+        if input.lowercased().hasPrefix("jql:") {
+            return String(input.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if input.isEmpty { return input }
+        let prefix = #"(?i)^(?:(?:NOT\b|!)\s*|\(\s*)*"#
+        let field = #"(?:"(?:\\.|[^"\\])+"|'(?:\\.|[^'\\])+'|cf\[\d+\]|[\p{L}_][\p{L}\p{N}_.]*)"#
+        let patterns = [
+            #"(?i)^ORDER\s+BY\b"#,
+            prefix + field + #"\s*(?:!=|!~|>=|<=|=|~|>|<)"#,
+            prefix + field + #"\s+(?:(?:NOT\s+)?IN\s*(?:\(|[\w]+\s*\()|IS\s+(?:NOT\s+)?(?:EMPTY|NULL)\b)"#,
+            prefix + #"(?:assignee|fixVersion|priority|reporter|resolution|status)\s+(?:WAS|CHANGED)\b"#
+        ]
+        return patterns.contains { input.range(of: $0, options: .regularExpression) != nil } ? input : nil
+    }
+
+    private static func textLiteral(_ input: String) -> String {
+        // Jira text searches are case-insensitive. Lowercase also prevents Lucene's AND/OR/NOT operators.
+        let text = input.split(whereSeparator: \.isWhitespace).joined(separator: " ").lowercased()
+        let reserved = Set(#"+-&|!(){}[]^"~*?:\/"#)
+        let lucene = text.map { reserved.contains($0) ? "\\" + String($0) : String($0) }.joined()
+        // Escape Lucene first, then the surrounding JQL string. JSON encoding is handled by the client.
+        let escaped = lucene.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"" + escaped + "\""
     }
 }
 
