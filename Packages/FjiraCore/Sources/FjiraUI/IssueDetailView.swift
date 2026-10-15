@@ -19,7 +19,7 @@ public struct IssueDetailView: View {
 
     private var issue: JiraIssue? { reader.detail?.issue.listIssue ?? (reader.isLoading ? lastPresentedIssue : nil) ?? reader.selection }
     private var document: String? {
-        reader.detail.map { IssueBodyHTML.document(detail: $0, baseURL: site.url, dark: colorScheme == .dark, avatars: reader.avatars, issueLinksError: reader.remoteLinksError, personPlaceholderDataURL: PersonAvatarPlaceholder.dataURL(dark: colorScheme == .dark)) }
+        reader.detail.map { IssueBodyHTML.document(detail: $0, baseURL: site.url, dark: colorScheme == .dark, avatars: reader.avatars, issueLinksError: reader.remoteLinksError, personPlaceholderDataURL: PersonAvatarPlaceholder.dataURL(dark: colorScheme == .dark), activityTab: reader.activityTab, historyIsLoading: reader.isLoadingHistory || reader.isLoading, historyError: reader.historyError, historyLimit: reader.historyLimit) }
     }
 
     public var body: some View {
@@ -67,6 +67,18 @@ public struct IssueDetailView: View {
     }
 
     private func handleAction(_ url: URL) {
+        if url.host == "activity" || url.host == "history" {
+            let issueID = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "issue" }?.value
+            guard issueID == reader.detail?.issue.id else { return }
+            if url.host == "activity", let tab = IssueActivityTab(rawValue: url.lastPathComponent) {
+                reader.selectActivity(tab)
+            } else if url.host == "history", url.lastPathComponent == "more" {
+                reader.showMoreHistory()
+            } else if url.host == "history", url.lastPathComponent == "retry" {
+                reader.retryHistory()
+            }
+            return
+        }
         if url.host == "epic", url.lastPathComponent == reader.detail?.issue.epicLink?.key {
             reader.openEpic()
             return

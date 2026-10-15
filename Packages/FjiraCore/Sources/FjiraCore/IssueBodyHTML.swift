@@ -1,7 +1,7 @@
 import Foundation
 
 public enum IssueBodyHTML {
-    public static func document(detail: CachedIssueDetail, baseURL: URL, dark: Bool, avatars: [String: CachedAvatar] = [:], issueLinksError: String? = nil, personPlaceholderDataURL: String? = nil) -> String {
+    public static func document(detail: CachedIssueDetail, baseURL: URL, dark: Bool, avatars: [String: CachedAvatar] = [:], issueLinksError: String? = nil, personPlaceholderDataURL: String? = nil, activityTab: IssueActivityTab = .comments, historyIsLoading: Bool = false, historyError: String? = nil, historyLimit: Int = 50) -> String {
         func rendered(_ html: String) -> String {
             JiraRichText.rendered(JiraRichTextImages.embedding(html, baseURL: baseURL, images: avatars))
         }
@@ -61,7 +61,18 @@ public enum IssueBodyHTML {
             img { max-width: 100%; height: auto; }
             img.emoticon, img.emoji { width: 16px; height: 16px; vertical-align: text-bottom; }
             blockquote { border-left: 3px solid #888; margin-left: 0; padding-left: 12px; }
-            .comment { border-top: 1px solid rgba(128,128,128,.3); padding: 12px 0; }
+            .activity { margin-top: 20px; border: 1px solid rgba(128,128,128,.3); border-radius: 10px; overflow: hidden; }
+            .activity-tabs { display: flex; gap: 8px; padding: 0 12px; background: rgba(128,128,128,.06); border-bottom: 1px solid rgba(128,128,128,.25); }
+            .activity-tab { display: inline-block; padding: 10px 8px; border-bottom: 2px solid transparent; text-decoration: none; color: inherit; opacity: .65; }
+            .activity-tab[aria-selected="true"] { opacity: 1; border-bottom-color: currentColor; color: \(dark ? "#75baff" : "#0066cc"); font-weight: 600; }
+            .activity-tab:focus-visible { outline: 2px solid currentColor; outline-offset: -4px; border-radius: 4px; }
+            .activity-panel { padding: 0 14px; }
+            .comment, .history-entry { border-top: 1px solid rgba(128,128,128,.2); padding: 14px 0; }
+            .activity-panel > article:first-child { border-top: 0; }
+            .history-change { margin: 10px 0; }
+            .history-values { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-top: 4px; }
+            .history-value { white-space: pre-wrap; margin-top: 3px; padding: 6px 8px; border-radius: 5px; background: rgba(128,128,128,.09); }
+            @media (max-width: 460px) { .history-values { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
             .comment-header { display: flex; gap: 10px; align-items: center; margin: 0 0 12px; }
             .author-name { font-size: 14px; font-weight: 600; }
             .avatar { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 50%; object-fit: cover; }
@@ -77,11 +88,70 @@ public enum IssueBodyHTML {
             <hr class="description-divider">
             \(description)
             \(issueLinks(detail, error: issueLinksError))
-            <h2>Comments</h2>\(comments.isEmpty ? "<p>No downloaded comments.</p>" : comments)
-            \(detail.hasPreviousComments ? "<p class=\"muted\">Some comments are from an earlier download.</p>" : "")
-            \(detail.hasMoreComments ? "<p><a href=\"fjira://comments/more\">Load more comments</a></p>" : "")
             \(relations(detail, baseURL: baseURL))
+            \(activity(detail, comments: comments, tab: activityTab, loading: historyIsLoading,
+                       error: historyError, limit: historyLimit, images: avatars, baseURL: baseURL))
             </body></html>
+            """
+    }
+
+    private static func activity(_ detail: CachedIssueDetail, comments: String, tab: IssueActivityTab,
+                                 loading: Bool, error: String?, limit: Int, images: [String: CachedAvatar], baseURL: URL) -> String {
+        let issueID = escape(detail.issue.id)
+        let tabs: String = [IssueActivityTab.comments, .history].map { item -> String in
+            let name = item == .comments ? "Comments" : "History"
+            return "<a id=\"activity-\(item.rawValue)-tab\" class=\"activity-tab\" role=\"tab\" tabindex=\"\(item == tab ? 0 : -1)\" aria-selected=\"\(item == tab)\" aria-controls=\"activity-panel\" href=\"fjira://activity/\(item.rawValue)?issue=\(issueID)\">\(name)</a>"
+        }.joined()
+        let content: String
+        if tab == .comments {
+            content = (comments.isEmpty ? "<p class=\"muted\">No comments yet.</p>" : comments)
+                + (detail.hasPreviousComments ? "<p class=\"muted\">Some comments are from an earlier download.</p>" : "")
+                + (detail.hasMoreComments ? "<p><a href=\"fjira://comments/more\">Load more comments</a></p>" : "")
+        } else {
+            let history = detail.history
+            var result = ""
+            if loading { result += "<p class=\"muted\" role=\"status\">\(history == nil ? "Loading history…" : "Updating history…")</p>" }
+            if let error {
+                result += "<p class=\"muted\" role=\"status\">\(escape(error)) <a href=\"fjira://history/retry?issue=\(issueID)\">Retry</a></p>"
+                if let history { result += "<p class=\"muted\">Showing history downloaded \(escape(history.fetchedAt.formatted(date: .abbreviated, time: .shortened))).</p>" }
+            }
+            if let history {
+                if history.entries.isEmpty && history.total == 0 { result += "<p class=\"muted\">No changes recorded yet.</p>" }
+                for entry in history.newestFirst.prefix(max(1, limit)) {
+                    let avatar = avatarMarkup(name: entry.authorName, url: entry.author?.avatarURL, className: "avatar", images: images)
+                    let changes: String = entry.items.map { change -> String in
+                        func value(_ text: String?, fallback: String?) -> String {
+                            let value = text ?? fallback ?? ""
+                            return value.isEmpty ? "<span class=\"muted\">None</span>" : escape(value)
+                        }
+                        return """
+                            <div class="history-change"><strong>\(escape(change.field))</strong>
+                            <div class="history-values"><div><span class="muted">From</span><div class="history-value">\(value(change.fromString, fallback: change.from))</div></div>
+                            <div><span class="muted">To</span><div class="history-value">\(value(change.toString, fallback: change.to))</div></div></div></div>
+                            """
+                    }.joined()
+                    result += """
+                        <article class="history-entry"><header class="comment-header">\(avatar)<div>
+                        <div class="author-name">\(escape(entry.authorName))</div><div class="muted">\(escape(entry.created.map(date) ?? ""))</div>
+                        </div></header>\(changes)</article>
+                        """
+                }
+                if history.entries.count > limit {
+                    result += "<p><a href=\"fjira://history/more?issue=\(issueID)\">Show more changes</a></p>"
+                }
+                if history.entries.count < history.total {
+                    result += "<p class=\"muted\">Jira returned \(history.entries.count) of \(history.total) changes. <a href=\"\(escape(baseURL.appending(path: "browse/\(detail.issue.key)").absoluteString))\">View full history in Jira</a>.</p>"
+                }
+            } else if !loading && error == nil {
+                result += "<p class=\"muted\">History has not been downloaded yet. <a href=\"fjira://history/retry?issue=\(issueID)\">Load history</a></p>"
+            }
+            content = result
+        }
+        return """
+            <section class="activity" aria-label="Issue activity" data-tab="\(tab.rawValue)">
+            <div class="activity-tabs" role="tablist" aria-label="Activity">\(tabs)</div>
+            <div id="activity-panel" class="activity-panel" role="tabpanel" aria-labelledby="activity-\(tab.rawValue)-tab">\(content)</div>
+            </section>
             """
     }
 

@@ -19,6 +19,19 @@ public struct RenderedIssueBody: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        configuration.userContentController.addUserScript(WKUserScript(source: """
+            document.addEventListener('keydown', event => {
+                const tab = event.target.closest?.('.activity-tab');
+                if (!tab || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                const tabs = [...tab.parentElement.querySelectorAll('.activity-tab')];
+                const index = tabs.indexOf(tab);
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+                    : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+                event.preventDefault();
+                tabs[next].focus({preventScroll: true});
+                tabs[next].click();
+            });
+            """, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient))
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         return webView
@@ -63,10 +76,12 @@ public struct RenderedIssueBody: NSViewRepresentable {
             // with loadHTMLString would clear the old issue before the next one is ready.
             webView.callAsyncJavaScript("""
                 const offset = resetScroll ? 0 : window.scrollY;
+                const focusedTab = resetScroll ? null : document.activeElement?.closest('.activity-tab')?.id;
                 const parsed = new DOMParser().parseFromString(html, 'text/html');
                 const replacement = document.importNode(parsed.documentElement, true);
                 document.documentElement.replaceWith(replacement);
                 window.scrollTo(0, offset);
+                if (focusedTab) document.getElementById(focusedTab)?.focus({preventScroll: true});
                 """, arguments: ["html": desiredDocument, "resetScroll": id != renderedID],
                 in: nil, in: .defaultClient) { [weak self, weak webView] result in
                     guard let self, let webView else { return }

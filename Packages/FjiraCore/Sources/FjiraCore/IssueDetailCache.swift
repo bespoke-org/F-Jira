@@ -10,6 +10,7 @@ extension ConnectionCache {
             if let previous = try Self.readDetail(in: db, site: site, account: account, id: detail.issue.id) {
                 if previous.issue.listIssue.updated > detail.issue.listIssue.updated { return }
                 snapshot.remoteLinks = detail.remoteLinks ?? previous.remoteLinks
+                snapshot.history = detail.history ?? previous.history
                 if detail.hasMoreComments {
                     let currentIDs = Set(detail.currentComments.map(\.id))
                     snapshot.previousComments = previous.comments.filter { !currentIDs.contains($0.id) }
@@ -86,6 +87,7 @@ extension ConnectionCache {
                                           generation: saved.generation, commentPages: saved.commentPages,
                                           previousComments: saved.previousComments)
         recovered.remoteLinks = saved.remoteLinks
+        recovered.history = saved.history
         return recovered
     }
 

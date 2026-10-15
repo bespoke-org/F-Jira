@@ -8,6 +8,10 @@ public final class IssueReader {
     public private(set) var detail: CachedIssueDetail?
     public private(set) var isLoading = false
     public private(set) var isOffline = false
+    public private(set) var activityTab: IssueActivityTab = .comments
+    public private(set) var isLoadingHistory = false
+    public private(set) var historyError: String?
+    public private(set) var historyLimit = 50
     public private(set) var remoteLinksError: String?
     public private(set) var errorMessage: String?
     public private(set) var avatars: [String: CachedAvatar] = [:]
@@ -39,6 +43,8 @@ public final class IssueReader {
     @ObservationIgnored var currentTask: Task<Void, Never>?
     @ObservationIgnored var avatarTask: Task<Void, Never>?
     @ObservationIgnored var remoteLinksTask: Task<Void, Never>?
+    @ObservationIgnored var historyTask: Task<Void, Never>?
+    @ObservationIgnored private var historyGeneration: UUID?
     @ObservationIgnored private var recentIssues: [String: IssueSnapshot] = [:]
     @ObservationIgnored private var recentIssueOrder: [String] = []
     @ObservationIgnored private var imageMemory: [String: CachedAvatar] = [:]
@@ -90,6 +96,7 @@ public final class IssueReader {
     private func show(_ issue: JiraIssue) {
         cancel()
         selection = issue
+        historyLimit = 50
         isOffline = false
         let saved = recentIssues[issue.id] ?? (issue.id == issue.key
             ? recentIssues.values.first { $0.detail.issue.key == issue.key } : nil)
@@ -145,7 +152,13 @@ public final class IssueReader {
         errorMessage = nil
         remoteLinksError = nil
         currentTask = Task {
-            defer { if requestID == generation { isLoading = false; currentTask = nil } }
+            defer {
+                if requestID == generation {
+                    isLoading = false
+                    currentTask = nil
+                    refreshHistoryIfNeeded()
+                }
+            }
             do {
                 if detail == nil {
                     let saved = try await cache.loadIssuePresentation(site: site.identifier, account: account, id: selection.id)
@@ -180,7 +193,13 @@ public final class IssueReader {
         isLoading = true
         errorMessage = nil
         currentTask = Task {
-            defer { if requestID == generation { isLoading = false; currentTask = nil } }
+            defer {
+                if requestID == generation {
+                    isLoading = false
+                    currentTask = nil
+                    refreshHistoryIfNeeded()
+                }
+            }
             do {
                 let page = try await client.comments(site: site, token: credentials(), id: detail.issue.id, startAt: detail.nextCommentStartAt)
                 try Task.checkCancellation()
@@ -200,6 +219,51 @@ public final class IssueReader {
         }
     }
 
+    public func selectActivity(_ tab: IssueActivityTab) {
+        activityTab = tab
+        if tab == .history { refreshHistoryIfNeeded() }
+    }
+
+    public func showMoreHistory() { historyLimit += 50 }
+
+    public func retryHistory() {
+        historyGeneration = nil
+        refreshHistoryIfNeeded()
+    }
+
+    private func refreshHistoryIfNeeded() {
+        guard activityTab == .history, !isLoading, historyTask == nil, let detail,
+              historyGeneration != detail.generation else { return }
+        let generation = requestID
+        historyGeneration = detail.generation
+        isLoadingHistory = true
+        historyError = nil
+        historyTask = Task {
+            defer {
+                if requestID == generation { isLoadingHistory = false; historyTask = nil }
+            }
+            do {
+                let history = try await client.issueHistory(site: site, token: credentials(), id: detail.issue.id)
+                try Task.checkCancellation()
+                guard requestID == generation else { return }
+                try await cache.saveIssueHistory(history, site: site.identifier, account: account,
+                                                 id: detail.issue.id, expectedGeneration: detail.generation)
+                let updated = try await cache.loadIssuePresentation(site: site.identifier, account: account, id: detail.issue.id)
+                try Task.checkCancellation()
+                guard requestID == generation else { return }
+                if let updated {
+                    present(updated.detail, images: updated.images)
+                    loadAvatars(updated.detail)
+                }
+            } catch is CancellationError { }
+            catch let error as URLError where error.code == .cancelled { }
+            catch {
+                guard requestID == generation else { return }
+                historyError = "Could not update history. \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func refreshRemoteLinks(_ detail: CachedIssueDetail, generation: UUID) {
         remoteLinksTask?.cancel()
         remoteLinksTask = Task {
@@ -212,7 +276,11 @@ public final class IssueReader {
                 let updated = try await cache.loadIssue(site: site.identifier, account: account, id: detail.issue.id)
                 try Task.checkCancellation()
                 guard requestID == generation else { return }
-                self.detail = updated
+                // This request owns links only; a concurrent history load may already have updated the body.
+                if var current = self.detail, current.generation == updated?.generation {
+                    current.remoteLinks = updated?.remoteLinks
+                    self.detail = current
+                }
                 remoteLinksError = nil
                 rememberCurrentIssue()
             } catch is CancellationError { }
@@ -225,7 +293,15 @@ public final class IssueReader {
     }
 
     private func present(_ downloaded: CachedIssueDetail, images: [String: CachedAvatar]) {
-        let detail = selection.map { downloaded.reconciling($0, preferOnEqual: false) } ?? downloaded
+        var detail = selection.map { downloaded.reconciling($0, preferOnEqual: false) } ?? downloaded
+        if let current = self.detail, current.generation == detail.generation {
+            if let links = current.remoteLinks, links.fetchedAt > (detail.remoteLinks?.fetchedAt ?? .distantPast) {
+                detail.remoteLinks = links
+            }
+            if let history = current.history, history.fetchedAt > (detail.history?.fetchedAt ?? .distantPast) {
+                detail.history = history
+            }
+        }
         let combined = imagesInMemory(for: detail.imageURLs(baseURL: site.url), cached: images)
         rememberImages(combined)
         // Publish the image bytes before the issue so its first render is complete.
@@ -341,6 +417,11 @@ public final class IssueReader {
 
     private func cancel() {
         currentTask?.cancel()
+        historyTask?.cancel()
+        historyTask = nil
+        historyGeneration = nil
+        isLoadingHistory = false
+        historyError = nil
         remoteLinksTask?.cancel()
         remoteLinksTask = nil
         avatarTask?.cancel()

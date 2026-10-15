@@ -71,6 +71,15 @@ Use the close button to return to the list.
 
 The viewer includes metadata, formatted description and comments, labels,
 components, fix versions, subtasks, issue links, and attachment metadata.
+Comments and History share a tabbed activity container below the issue content.
+History loads on demand using Jira Server/Data Center's
+[`expand=changelog` API](https://support.atlassian.com/jira/kb/how-to-analyze-the-history-or-changelog-of-an-issue-in-jira/),
+shows authors, timestamps, and old/new field values newest first, and displays
+50 changes at a time. Downloaded history and author avatars remain available
+offline and survive issue refreshes. Failed history updates keep the cached
+entries and offer Retry. If Jira returns only part of a history, the viewer says
+so and links to the web issue. Tab switches preserve the existing viewport;
+Left/Right Arrow, Home, and End work while the tab strip has keyboard focus.
 Flagged issues show a red flag in the table, board cards, and detail header; board
 cards also get a pale yellow tint. Flag state is cached for offline viewing. The
 search discovers the instance-specific Flagged custom field automatically, while

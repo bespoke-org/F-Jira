@@ -155,13 +155,15 @@ public struct CachedIssueDetail: Codable, Sendable {
     public var commentPages: [CachedCommentPage]
     public var previousComments: [JiraComment]
     public var remoteLinks: CachedRemoteIssueLinks? = nil
+    public var history: CachedIssueHistory? = nil
 
     var imageURLs: [URL] {
         let fields = issue.fields
         let metadata = [fields.issuetype?.iconUrl, fields.priority?.iconUrl,
                         fields.assignee?.avatarURL, issue.implementer?.avatarURL, fields.reporter?.avatarURL].compactMap { $0 }
         var seen = Set<URL>()
-        return (metadata + comments.compactMap { $0.author?.avatarURL }).filter { seen.insert($0).inserted }
+        return (metadata + comments.compactMap { $0.author?.avatarURL }
+                + (history?.entries.compactMap { $0.author?.avatarURL } ?? [])).filter { seen.insert($0).inserted }
     }
 
     func imageURLs(baseURL: URL) -> [URL] {

@@ -8,6 +8,60 @@ import XCTest
 
 @MainActor
 final class IssueViewportTests: XCTestCase {
+    func testActivityTabsSwitchInPlaceAndSupportKeyboardNavigation() async throws {
+        _ = NSApplication.shared
+        let json = #"{"id":"100","key":"EX-1","fields":{"summary":"Improve activity view","description":"Issue description stays above activity.","comment":{"comments":[{"id":"c1","body":"Comment body","author":{"displayName":"Comment author"}}]}},"changelog":{"startAt":0,"maxResults":1,"total":1,"histories":[{"id":"h1","created":"2026-10-15T10:00:00.000+0000","author":{"displayName":"History author"},"items":[{"field":"status","fromString":"Developing","toString":"Reviewing"}]}]}}"#
+        let site = try JiraSite("https://jira.example.com")
+        let client = JiraClient(transport: FixtureTransport(data: Data(json.utf8)))
+        let detail = try await client.issue(site: site, token: "token", id: "100")
+        let reader = IssueReader(site: site, account: "fixture", cache: try ConnectionCache(path: ":memory:"), client: client, token: { "token" })
+        reader.open(detail.issue.listIssue)
+        await reader.currentTask?.value
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: IssueDetailView(reader: reader, site: site, close: {}))
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.contentView = nil; window.close(); reader.close() }
+        var web: WKWebView?
+        for _ in 0..<150 {
+            web = findWebView(host)
+            if let web, (try? await evaluate(web, "document.querySelector('.activity')?.dataset.tab ?? ''")) == "comments" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let content = try XCTUnwrap(web)
+        _ = try await evaluate(content, "window.activityMarker = 'same viewport'; document.getElementById('activity-history-tab').focus(); document.getElementById('activity-history-tab').click(); 'clicked'")
+        for _ in 0..<150 {
+            if (try? await evaluate(content, "document.querySelector('.history-entry')?.textContent ?? ''"))?.contains("Reviewing") == true { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(reader.activityTab, .history)
+        let selected = try await evaluate(content, "document.getElementById('activity-history-tab').getAttribute('aria-selected')")
+        XCTAssertEqual(selected, "true")
+        let author = try await evaluate(content, "document.querySelector('.history-entry .author-name')?.textContent ?? ''")
+        XCTAssertEqual(author, "History author")
+        let text = try await evaluate(content, "document.body.textContent")
+        XCTAssertTrue(text.contains("Issue description stays above activity."))
+        XCTAssertFalse(text.contains("Comment body"))
+        XCTAssertFalse(text.contains("GRDB."))
+        let values = try await evaluate(content, "[...document.querySelectorAll('.history-value')].map(node => node.textContent).join(' → ')")
+        XCTAssertEqual(values, "Developing → Reviewing")
+        let marker = try await evaluate(content, "window.activityMarker ?? ''")
+        XCTAssertEqual(marker, "same viewport")
+        let focus = try await evaluate(content, "document.activeElement.id")
+        XCTAssertEqual(focus, "activity-history-tab", "Updating the activity panel must preserve tab keyboard focus")
+        _ = try await evaluate(content, "document.getElementById('activity-history-tab').dispatchEvent(new KeyboardEvent('keydown', {key: 'Home', bubbles: true})); 'pressed'")
+        for _ in 0..<150 {
+            if (try? await evaluate(content, "document.querySelector('.comment')?.textContent ?? ''"))?.contains("Comment body") == true { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(reader.activityTab, .comments)
+        let comment = try await evaluate(content, "document.querySelector('.comment')?.textContent ?? ''")
+        XCTAssertTrue(comment.contains("Comment body"))
+        XCTAssertTrue(findWebView(host) === content)
+    }
+
     func testLongCommentsStayInScrollableViewport() async throws {
         _ = NSApplication.shared
         let lines = (0..<40).map { "<p>Comment line \($0)</p>" }.joined()
