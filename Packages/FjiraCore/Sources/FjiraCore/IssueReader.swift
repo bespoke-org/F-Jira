@@ -33,6 +33,7 @@ public final class IssueReader {
         }
     }
 
+    @ObservationIgnored public var onVisit: ((JiraIssue) -> Void)?
     @ObservationIgnored public var onIssueUpdate: ((JiraIssue) -> Void)?
     @ObservationIgnored private let site: JiraSite
     @ObservationIgnored private let account: String
@@ -112,6 +113,7 @@ public final class IssueReader {
         avatars = imagesInMemory(for: knownURLs, cached: saved?.avatars ?? [:])
         detail = restored
         rememberCurrentIssue()
+        onVisit?(selection ?? issue)
         refresh()
     }
 

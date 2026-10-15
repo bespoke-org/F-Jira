@@ -74,6 +74,21 @@ final class IssueNavigationTests: XCTestCase {
         XCTAssertEqual(reader.detail?.issue.id, "2")
     }
 
+    func testVisitsTrackOpeningAndNavigationButNotRefreshes() async throws {
+        let (reader, first, second) = try await fixture()
+        defer { reader.resetNavigation() }
+        var visits: [String] = []
+        reader.onVisit = { visits.append($0.key) }
+        reader.open(first)
+        await reader.currentTask?.value
+        reader.refresh()
+        await reader.currentTask?.value
+        XCTAssertEqual(visits, [first.key])
+        reader.open(second)
+        reader.goBack()
+        XCTAssertEqual(visits, [first.key, second.key, first.key])
+    }
+
     private func fixture() async throws -> (IssueReader, JiraIssue, JiraIssue) {
         let site = try JiraSite("https://jira.example.com")
         let cache = try ConnectionCache(path: ":memory:")

@@ -3,12 +3,14 @@ import SwiftUI
 public struct IssueBrowserLayout<Issues: View, Detail: View>: View {
     @Binding private var isIssuePresented: Bool
     @State private var usesSidePane = false
+    private let extendsUnderToolbar: Bool
     private let issues: () -> Issues
     private let detail: () -> Detail
 
-    public init(isIssuePresented: Binding<Bool>, @ViewBuilder issues: @escaping () -> Issues,
+    public init(isIssuePresented: Binding<Bool>, extendsUnderToolbar: Bool = true, @ViewBuilder issues: @escaping () -> Issues,
                 @ViewBuilder detail: @escaping () -> Detail) {
         _isIssuePresented = isIssuePresented
+        self.extendsUnderToolbar = extendsUnderToolbar
         self.issues = issues
         self.detail = detail
     }
@@ -16,11 +18,11 @@ public struct IssueBrowserLayout<Issues: View, Detail: View>: View {
     public var body: some View {
         HSplitView {
             issues()
-                .ignoresSafeArea(.container, edges: .top)
+                .ignoresSafeArea(.container, edges: extendsUnderToolbar ? .top : [])
                 .frame(minWidth: usesSidePane ? 500 : 0)
             if usesSidePane && isIssuePresented {
                 detail()
-                    .ignoresSafeArea(.container, edges: .top)
+                    .ignoresSafeArea(.container, edges: extendsUnderToolbar ? .top : [])
                     .frame(minWidth: 380, idealWidth: 440, maxWidth: .infinity)
             }
         }

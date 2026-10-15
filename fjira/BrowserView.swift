@@ -8,10 +8,15 @@ struct BrowserView: View {
     let showAccount: () -> Void
     @State private var projectFilter = ""
     @State private var showingProjects = false
-    @State private var selectedView: BrowserSection? = .issues
+    @State private var selectedView: BrowserSection? = .dashboard
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
 
-    private enum BrowserSection: Hashable { case issues, boards }
+    private enum BrowserSection: Hashable {
+        case dashboard, issues, boards
+        var title: String {
+            switch self { case .dashboard: "Dashboard"; case .issues: "Issues"; case .boards: "Boards" }
+        }
+    }
     @State private var selectedIssueID: String?
     @State private var sortOrder: [KeyPathComparator<JiraIssue>] = []
 
@@ -28,10 +33,14 @@ struct BrowserView: View {
         NavigationSplitView(columnVisibility: $sidebarVisibility) {
             VStack(spacing: 0) {
                 List(selection: $selectedView) {
-                    Label("Issues", systemImage: "list.bullet.rectangle")
-                        .tag(BrowserSection.issues)
-                    Label("Boards", systemImage: "rectangle.split.3x1")
-                        .tag(BrowserSection.boards)
+                    Label("Dashboard", systemImage: "square.grid.2x2")
+                        .tag(BrowserSection.dashboard)
+                    Section("Browse") {
+                        Label("Issues", systemImage: "list.bullet.rectangle")
+                            .tag(BrowserSection.issues)
+                        Label("Boards", systemImage: "rectangle.split.3x1")
+                            .tag(BrowserSection.boards)
+                    }
                 }
                 .listStyle(.sidebar)
                 Divider()
@@ -46,9 +55,20 @@ struct BrowserView: View {
                     IssueBrowserLayout(isIssuePresented: Binding(
                         get: { model.issueReader.selection != nil },
                         set: { presented in if !presented { closeIssue() } }
-                    )) {
-                        if selectedView == .boards {
-                            BoardsView(model: model, commands: commandContext)
+                    ), extendsUnderToolbar: selectedView == .issues) {
+                        if selectedView == .dashboard {
+                            DashboardView(reader: model.dashboardReader,
+                                          images: model.tableImages, selectedKey: model.issueReader.selection?.key,
+                                          openIssue: { model.issueReader.open($0) },
+                                          openComment: { issue in
+                                              model.issueReader.selectActivity(.comments)
+                                              model.issueReader.open(issue)
+                                          }, browse: { section in
+                                              guard let query = model.dashboardReader.snapshot(for: section)?.query else { return }
+                                              browse(query)
+                                          }, browseQuery: browse)
+                        } else if selectedView == .boards {
+                            BoardsView(model: model)
                         } else {
                             issueList
                         }
@@ -59,17 +79,37 @@ struct BrowserView: View {
                     ContentUnavailableView("Select a project", systemImage: "folder", description: Text("Choose a project at the bottom of the sidebar to search its issues."))
                 }
             }
-            .ignoresSafeArea(.container, edges: .top)
+            .ignoresSafeArea(.container, edges: selectedView == .issues ? .top : [])
+            .modifier(TopScrollEdge(soft: true))
             .toolbar {
                 JiraNavigationControls(context: commandContext)
                 if #available(macOS 26.0, *) {
                     ToolbarItem(placement: .navigation) {
-                        Text(selectedView == .boards ? "Boards" : "Issues").font(.title2.bold())
+                        Text((selectedView ?? .dashboard).title).font(.title2.bold())
                     }
                     .sharedBackgroundVisibility(.hidden)
                 } else {
                     ToolbarItem(placement: .navigation) {
-                        Text(selectedView == .boards ? "Boards" : "Issues").font(.title2.bold())
+                        Text((selectedView ?? .dashboard).title).font(.title2.bold())
+                    }
+                }
+                if model.selectedProject != nil && selectedView != .issues {
+                    if #available(macOS 26.0, *) {
+                        ToolbarSpacer(.flexible, placement: .primaryAction)
+                    } else {
+                        ToolbarItem(placement: .primaryAction) { Spacer() }
+                    }
+                    if selectedView == .boards {
+                        BoardToolbar(reader: model.boardReader, commands: commandContext)
+                    } else if selectedView == .dashboard {
+                        ToolbarItemGroup(placement: .primaryAction) {
+                            if model.dashboardReader.isLoading {
+                                ProgressView().controlSize(.small)
+                                    .frame(width: 32, height: 28)
+                                    .accessibilityLabel("Updating")
+                            }
+                            JiraCommandIconButton(.refresh, context: commandContext)
+                        }
                     }
                 }
             }
@@ -79,6 +119,9 @@ struct BrowserView: View {
         .task { await model.restore() }
         .task(id: selectedView == .boards ? model.selectedProjectID : nil) {
             if selectedView == .boards { model.boardReader.openProject(model.selectedProjectID) }
+        }
+        .task(id: selectedView == .dashboard ? model.selectedProjectID : nil) {
+            if selectedView == .dashboard { model.dashboardReader.openProject(model.selectedProjectID) }
         }
         .onChange(of: selectedView) { _, _ in resetIssueNavigation() }
         .onChange(of: model.boardReader.selectedBoardID) { _, _ in
@@ -92,7 +135,7 @@ struct BrowserView: View {
         }
         .onChange(of: model.selectedProjectID) { _, _ in resetIssueNavigation(); sortOrder = [] }
         .onChange(of: model.search?.query) { _, _ in
-            if selectedView != .boards { resetIssueNavigation(); sortOrder = [] }
+            if selectedView == .issues { resetIssueNavigation(); sortOrder = [] }
         }
     }
 
@@ -342,6 +385,8 @@ struct BrowserView: View {
                     Text(issue.updated == .distantPast ? "—" : issue.updated.formatted(date: .abbreviated, time: .shortened))
                 }.width(min: 140, ideal: 160)
             }
+            // Column headings need an opaque edge even though the window toolbar uses a soft fade.
+            .modifier(TopScrollEdge(soft: false))
             .overlay {
                 if issues.isEmpty {
                     if model.isSearching || model.isLoadingCache {
@@ -385,6 +430,12 @@ struct BrowserView: View {
         }
     }
 
+    private func browse(_ query: ProjectQuery) {
+        selectedView = .issues
+        model.queryText = query.input
+        model.runSearch()
+    }
+
     private func resetIssueNavigation() {
         selectedIssueID = nil
         model.issueReader.resetNavigation()
@@ -397,11 +448,13 @@ struct BrowserView: View {
 
     private var commandContext: JiraCommandContext {
         let showingBoards = selectedView == .boards
-        let currentIssue = model.issueReader.selection ?? (showingBoards ? nil : selectedIssue)
+        let showingDashboard = selectedView == .dashboard
+        let currentIssue = model.issueReader.selection ?? (selectedView == .issues ? selectedIssue : nil)
         let board = showingBoards ? model.boardReader.selectedBoard : nil
         let canRefreshBoard = showingBoards && model.selectedProject != nil
             && !model.boardReader.isLoading && !model.boardReader.isLoadingBoards
-        let canSearch = !showingBoards && model.selectedProject != nil && !model.isRestoring
+        let canRefreshDashboard = showingDashboard && model.selectedProject != nil && !model.dashboardReader.isLoading
+        let canSearch = selectedView == .issues && model.selectedProject != nil && !model.isRestoring
             && !model.isLoadingCache && !model.isSearching
         return JiraCommandContext([
             .toggleSidebar: JiraCommandAction {
@@ -417,12 +470,26 @@ struct BrowserView: View {
                     NSWorkspace.shared.open(board.webURL(site: model.connection.site))
                 }
             },
-            .refresh: JiraCommandAction(isEnabled: currentIssue != nil ? !model.issueReader.isLoading : (canSearch || canRefreshBoard)) {
+            .refresh: JiraCommandAction(isEnabled: currentIssue != nil ? !model.issueReader.isLoading : (canSearch || canRefreshBoard || canRefreshDashboard)) {
                 if currentIssue != nil { model.issueReader.refresh() }
                 else if showingBoards { model.boardReader.refresh() }
+                else if showingDashboard { model.dashboardReader.refresh() }
                 else { model.runSearch() }
             },
             .search: JiraCommandAction(isEnabled: canSearch) { model.runSearch() }
         ])
+    }
+}
+
+private struct TopScrollEdge: ViewModifier {
+    let soft: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.scrollEdgeEffectStyle(soft ? .soft : .hard, for: .top)
+        } else {
+            content
+        }
     }
 }

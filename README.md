@@ -23,7 +23,7 @@ comment avatars.
 
 The project button in the sidebar footer shows the selected project's name, key,
 and image. Click it to search and switch projects or refresh the project list.
-Project responses and images are cached for offline use. The sidebar contains app views, **Issues** and **Boards**,
+Project responses and images are cached for offline use. The sidebar opens on **Dashboard**, with **Issues** and **Boards** under **Browse**,
 with the project and account controls pinned at the bottom. Native window controls
 sit above the sidebar, while the issue area extends to the top of the window.
 Use the native toggle at the top of the sidebar to hide or show it.
@@ -60,6 +60,42 @@ Refreshing the first page replaces the current result list and invalidates older
 pagination, while downloaded issue responses remain cached for later use.
 Projects, search results, and selections are isolated by instance and account.
 The browsing migration preserves existing connections and tokens.
+
+## Dashboard
+
+Dashboard is the home page for the selected project. **Current Issues** shows open
+issues other than New or Backlog where you are either **Assignee or Implementer**, so handing a task to a
+tester keeps it in your list. Implementer is discovered from Jira's custom fields.
+**Up next** uses the same ownership rule and includes New, Backlog, and Jira's To Do status category.
+**Recently done** shows your Done issues resolved in the last 14 days.
+Each section downloads up to 50 issues; **View all** opens its query in Issues,
+where you can fetch further pages.
+
+**Tasks completed per week** counts your Done issues by resolution week.
+The chart fits as many Monday–Sunday weeks as its width allows,
+always keeping the current week at the right with a stronger bar color and a
+“This week” label. Widening the window loads any missing older weeks; narrowing
+it keeps that history cached and displays the most recent weeks. It uses the timezone
+in your Jira profile. Statistics sit above Current Issues in the same column,
+with Recently viewed and comments alongside in wide windows. Click any bar to open its
+query in Issues. Counts come directly from Jira, so they are not capped at 50
+downloaded issues. They use current Assignee/Implementer ownership and current
+Done status, rather than historical ownership or every past completion event.
+The statistics and their query responses are cached per account and project;
+a failed refresh preserves them. Older offline snapshots show their week instead
+of presenting an old count as this week's result.
+
+**Recently viewed** remembers the last 20 issues opened in each project and shows
+the six latest. **New comments** shows up to 20 recent comments from the last seven
+days, with a switch between your issues and the entire project. It scans recently
+updated issues in batches of up to 150 per refresh. On busy projects, **Find more
+recent activity** continues the scan. This is an activity feed, not an unread count.
+Click a comment to open its issue's Comments tab.
+
+Dashboard snapshots, comments, and visits are cached per server, account, and
+project. Downloaded content appears before network refreshes and stays visible
+if Jira is unavailable. Dashboard queries do not fill Downloaded searches.
+Cmd+R refreshes Dashboard when no issue is open.
 
 ## Issue details
 

@@ -9,6 +9,7 @@ final class BrowserModel {
     let connection: CachedConnection
     let issueReader: IssueReader
     let boardReader: BoardReader
+    let dashboardReader: DashboardReader
     var queryText = ""
     private(set) var projects: [JiraProject] = []
     private(set) var projectsFetchedAt: Date?
@@ -55,6 +56,21 @@ final class BrowserModel {
                 throw JiraError.missingToken
             }
             return token
+        }
+        dashboardReader = DashboardReader(site: connection.site, account: connection.user.identifier, cache: cache, client: client) {
+            guard let token = try TokenStore().load(site: connection.site.identifier, account: connection.user.identifier) else {
+                throw JiraError.missingToken
+            }
+            return token
+        }
+        issueReader.onVisit = { [weak self] issue in
+            guard let self, let project = self.projects.first(where: { issue.key.hasPrefix($0.key + "-") }) else { return }
+            self.dashboardReader.recordViewed(issue, project: project.id)
+        }
+        dashboardReader.onIssuesUpdate = { [weak self] issues in self?.applyKnownIssues(issues) }
+        dashboardReader.onPresentation = { [weak self] images in
+            self?.applyTableImages(images)
+            self?.prefetchTableImages()
         }
         issueReader.onIssueUpdate = { [weak self] issue in self?.applyKnownIssues([issue]) }
         boardReader.onIssuesUpdate = { [weak self] issues in self?.applyKnownIssues(issues) }
@@ -112,6 +128,7 @@ final class BrowserModel {
         let generation = selectionID
         selectedProjectID = id
         boardReader.reset()
+        dashboardReader.reset()
         search = nil
         history = []
         queryText = ""
@@ -156,6 +173,7 @@ final class BrowserModel {
 
     func stop() {
         boardReader.reset()
+        dashboardReader.reset()
         issueReader.resetNavigation()
         cancelSearch()
         projectTask?.cancel()
@@ -271,6 +289,7 @@ final class BrowserModel {
         search = search?.reconciling(issues)
         history = history.map { $0.reconciling(issues) }
         boardReader.applyKnownIssues(issues)
+        dashboardReader.applyKnownIssues(issues)
         issueReader.applyKnownIssues(issues)
     }
 
@@ -282,7 +301,7 @@ final class BrowserModel {
                 defer { tableImageTask = nil }
                 var credential: String?
                 while !Task.isCancelled {
-                    let urls = boardReader.imageURLs + (search?.tableImageURLs ?? [])
+                    let urls = dashboardReader.imageURLs + boardReader.imageURLs + (search?.tableImageURLs ?? [])
                     var seen = Set<URL>()
                     let missing = urls.filter { seen.insert($0).inserted }.filter { url in
                         tableImageDates[url.absoluteString].map { Date().timeIntervalSince($0) >= 86_400 } ?? true
