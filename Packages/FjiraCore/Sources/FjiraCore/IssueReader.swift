@@ -29,6 +29,7 @@ public final class IssueReader {
         }
     }
 
+    @ObservationIgnored public var onIssueUpdate: ((JiraIssue) -> Void)?
     @ObservationIgnored private let site: JiraSite
     @ObservationIgnored private let account: String
     @ObservationIgnored private let cache: ConnectionCache
@@ -92,15 +93,16 @@ public final class IssueReader {
         isOffline = false
         let saved = recentIssues[issue.id] ?? (issue.id == issue.key
             ? recentIssues.values.first { $0.detail.issue.key == issue.key } : nil)
-        if let saved {
-            selection = saved.detail.issue.listIssue
-            navigation.replaceCurrent(.issue(saved.detail.issue.listIssue))
+        let restored = saved?.detail.reconciling(issue, preferOnEqual: false)
+        if let restored {
+            selection = restored.issue.listIssue
+            navigation.replaceCurrent(.issue(restored.issue.listIssue))
         }
         rememberImages(saved?.avatars ?? [:])
         let knownURLs = saved?.detail.imageURLs(baseURL: site.url) ?? [issue.fields.issuetype?.iconUrl, issue.fields.priority?.iconUrl,
                                                     issue.fields.assignee?.avatarURL].compactMap { $0 }
         avatars = imagesInMemory(for: knownURLs, cached: saved?.avatars ?? [:])
-        detail = saved?.detail
+        detail = restored
         rememberCurrentIssue()
         refresh()
     }
@@ -222,7 +224,8 @@ public final class IssueReader {
         }
     }
 
-    private func present(_ detail: CachedIssueDetail, images: [String: CachedAvatar]) {
+    private func present(_ downloaded: CachedIssueDetail, images: [String: CachedAvatar]) {
+        let detail = selection.map { downloaded.reconciling($0, preferOnEqual: false) } ?? downloaded
         let combined = imagesInMemory(for: detail.imageURLs(baseURL: site.url), cached: images)
         rememberImages(combined)
         // Publish the image bytes before the issue so its first render is complete.
@@ -230,6 +233,21 @@ public final class IssueReader {
         selection = detail.issue.listIssue
         navigation.replaceCurrent(.issue(detail.issue.listIssue))
         self.detail = detail
+        rememberCurrentIssue()
+        onIssueUpdate?(detail.issue.listIssue)
+    }
+
+    public func applyKnownIssues(_ issues: [JiraIssue]) {
+        for issue in issues {
+            if let saved = recentIssues[issue.id] {
+                recentIssues[issue.id] = IssueSnapshot(detail: saved.detail.reconciling(issue), avatars: saved.avatars)
+            }
+            if selection?.id == issue.id {
+                selection = selection?.accepting(issue)
+                if let selection { navigation.replaceCurrent(.issue(selection)) }
+                detail = detail?.reconciling(issue)
+            }
+        }
         rememberCurrentIssue()
     }
 

@@ -5,8 +5,10 @@ extension ConnectionCache {
     public func saveIssue(_ detail: CachedIssueDetail, site: String, account: String) throws {
         try database.write { db in
             // Keep a complete detail response separate from the smaller search-list projection.
+            _ = try Self.mergeIssues([detail.issue.listIssue], in: db, site: site, account: account, verified: true)
             var snapshot = detail
             if let previous = try Self.readDetail(in: db, site: site, account: account, id: detail.issue.id) {
+                if previous.issue.listIssue.updated > detail.issue.listIssue.updated { return }
                 snapshot.remoteLinks = detail.remoteLinks ?? previous.remoteLinks
                 if detail.hasMoreComments {
                     let currentIDs = Set(detail.currentComments.map(\.id))
@@ -18,13 +20,17 @@ extension ConnectionCache {
     }
 
     public func loadIssue(site: String, account: String, id: String) throws -> CachedIssueDetail? {
-        try database.read { db in try Self.readDetail(in: db, site: site, account: account, id: id) }
+        try database.read { db in
+            guard let detail = try Self.readDetail(in: db, site: site, account: account, id: id) else { return nil }
+            return try Self.presenting(detail, in: db, site: site, account: account)
+        }
     }
 
     func loadIssuePresentation(site: String, account: String, id: String) throws
         -> (detail: CachedIssueDetail, images: [String: CachedAvatar])? {
         try database.read { db in
-            guard let detail = try Self.readDetail(in: db, site: site, account: account, id: id) else { return nil }
+            guard let saved = try Self.readDetail(in: db, site: site, account: account, id: id) else { return nil }
+            let detail = try Self.presenting(saved, in: db, site: site, account: account)
             let urls = URL(string: site).map { detail.imageURLs(baseURL: $0) } ?? detail.imageURLs
             let images = try Self.cachedImages(in: db, site: site, account: account, urls: urls)
             return (detail, images)

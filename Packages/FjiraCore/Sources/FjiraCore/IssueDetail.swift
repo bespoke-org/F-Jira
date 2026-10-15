@@ -3,7 +3,7 @@ import Foundation
 public struct JiraIssueDetail: Codable, Sendable {
     public let id: String
     public let key: String
-    public let fields: Fields
+    public internal(set) var fields: Fields
     public let renderedFields: RenderedFields?
     public let epicLink: JiraEpicLink?
     public let implementer: JiraUser?
@@ -145,7 +145,7 @@ public struct CachedCommentPage: Codable, Sendable {
 }
 
 public struct CachedIssueDetail: Codable, Sendable {
-    public let issue: JiraIssueDetail
+    public internal(set) var issue: JiraIssueDetail
     public let response: Data
     public let fetchedAt: Date
     public let generation: UUID

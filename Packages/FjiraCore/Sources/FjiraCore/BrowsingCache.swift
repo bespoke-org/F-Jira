@@ -40,7 +40,11 @@ extension ConnectionCache {
             try Data.fetchAll(db,
                 sql: "SELECT snapshot FROM search_snapshot WHERE site = ? AND account = ? AND project = ?",
                 arguments: [site, account, project])
-                .map { try JSONDecoder().decode(CachedSearch.self, from: $0).restoringMetadata }
+                .map { data in
+                    let saved = try JSONDecoder().decode(CachedSearch.self, from: data).restoringMetadata
+                    let known = try Self.knownIssues(saved.issues.map(\.id), in: db, site: site, account: account)
+                    return saved.reconciling(known.values.map(\.issue))
+                }
                 .sorted { $0.fetchedAt > $1.fetchedAt }
         }
     }
@@ -50,6 +54,7 @@ extension ConnectionCache {
         expectedGeneration: UUID? = nil
     ) throws {
         try database.write { db in
+            _ = try Self.mergeIssues(page.page.issues, in: db, site: site, account: account)
             var snapshot: CachedSearch
             if page.page.startAt == 0 {
                 snapshot = CachedSearch(query: query, generation: UUID(), pages: [page])
@@ -114,6 +119,8 @@ extension ConnectionCache {
         guard let data = try Data.fetchOne(db,
             sql: "SELECT snapshot FROM search_snapshot WHERE site = ? AND account = ? AND project = ? AND input = ?",
             arguments: [site, account, query.projectID, query.input]) else { return nil }
-        return try JSONDecoder().decode(CachedSearch.self, from: data).restoringMetadata
+        let saved = try JSONDecoder().decode(CachedSearch.self, from: data).restoringMetadata
+        let known = try knownIssues(saved.issues.map(\.id), in: db, site: site, account: account)
+        return saved.reconciling(known.values.map(\.issue))
     }
 }

@@ -23,7 +23,7 @@ comment avatars.
 
 The project button in the sidebar footer shows the selected project's name, key,
 and image. Click it to search and switch projects or refresh the project list.
-Project responses and images are cached for offline use. The sidebar contains app views, currently **Issues**,
+Project responses and images are cached for offline use. The sidebar contains app views, **Issues** and **Boards**,
 with the project and account controls pinned at the bottom. Native window controls
 sit above the sidebar, while the issue area extends to the top of the window.
 Use the native toggle at the top of the sidebar to hide or show it.
@@ -129,6 +129,64 @@ comments remain available during partial refreshes and are marked as older until
 current pages are fetched. Changing selection cancels the old request; late
 responses cannot replace the newly selected issue.
 
+## Boards
+
+Choose **Boards** in the sidebar and select a board associated with the current
+project. Columns follow Jira's configured names, order, and status mappings.
+Cards retain Jira's rank order and show the issue key, title, type, priority, and
+assignee. Query-based swimlanes use the configured section names and order,
+with a collapsible header and empty sections hidden. Issues enter the first matching
+swimlane; the default section catches the remaining issues. Sections share one
+horizontal scroll position and stack vertically. Each column scrolls vertically.
+When only one section is expanded, it fills the remaining board height beneath
+the section headers and grows or shrinks with the window. Multiple open sections
+keep compact column heights and scroll together vertically.
+Click a card to open the same issue detail pane used by Issues.
+
+Kanban boards apply their configured subquery and the board's cutoff for older
+completed tasks. When Kanban backlog is enabled, its separate backlog column is
+excluded from the working board. Scrum boards show issues in active
+sprints. A board can include issues from several projects, matching its Jira filter.
+**Filter cards** searches downloaded keys and titles; **Only my issues** filters by
+assignee. These filters work offline. Board lists, configurations, issue pages,
+selection, and images are cached per Jira site and account. Cached boards appear
+before refreshing. Each column in each swimlane initially fetches up to 50 cards, with more loaded
+when you scroll to its bottom. Column headers show Jira's total when available;
+the paging footer shows how many cards are displayed. Cached boards also start
+with at most 50 cards per column. Previously downloaded cards remain available
+offline, including older cards beyond the refreshed first page. Older results are
+identified in the paging footer until their pages are refreshed. Filters search
+all downloaded cards; use **Load more** explicitly while filtering to fetch more.
+Failed refreshes preserve the previous board, and failed next-page requests can
+be retried without skipping cards. Board options include refreshing the board list.
+
+Issue fields are shared between board cards, search results, and full details.
+The newest Jira `updated` timestamp wins, so a stale node response cannot roll a
+known Done issue back to Review. Existing downloaded details also correct older
+board snapshots offline. Opening a newer issue detail immediately updates its
+visible card and table row. Cards moved by a local status correction appear at
+the bottom of their destination column, after its existing cards. Full descriptions and comments keep their own cached
+response and are not replaced by a smaller list response.
+
+When a board page disagrees with a known status, F Jira verifies that issue with
+a small direct issue request, at most once per refresh and four requests at a
+time. Unchanged cards need no extra request. Failed verification keeps the newest
+known revision; direct responses cannot overwrite a newer revision either.
+Corrections preserve server page offsets, hide completed issues beyond the
+board's cutoff, and avoid showing an exact total for an affected incomplete
+column. This mitigates inconsistent Jira indexes; it cannot discover issues
+omitted by the server or re-evaluate arbitrary board/swimlane JQL locally.
+
+Cmd+R refreshes the board when no issue is open, and Cmd+O opens the board in Jira.
+With an issue open, those commands apply to the issue. Switching boards or views
+resets issue navigation history. This version supports viewing boards; dragging
+cards, editing, Jira quick filters, and grouping by epics, stories, projects, or
+assignees are not implemented. Swimlane configuration and the completed-task cutoff
+come from Jira's internal read-only `rapidviewconfig/editmodel.json` endpoint;
+servers that restrict this endpoint show an error and retain any cached board.
+The API integration uses Jira Software's read-only
+[board endpoints](https://docs.atlassian.com/jira-software/REST/7.3.1/).
+
 ## Development
 
 Requires macOS 14 or later and Xcode with the Swift 6 toolchain.
@@ -143,6 +201,16 @@ instead of HTML. The rendering regressions check for this failure.
 ```sh
 xcodebuild -project fjira.xcodeproj -scheme fjira -configuration Debug -destination 'platform=macOS' -derivedDataPath build build
 swift test --package-path Packages/FjiraCore
+```
+
+An opt-in board benchmark scrolls a 94-card fixture horizontally, vertically, and
+diagonally, reporting median, p95, and maximum main-thread update times. It checks
+an 8.33 ms p95 budget and requires a visible desktop. These are CPU layout/display
+measurements, not measured display FPS; results vary with system load. The regular
+test suite skips this benchmark. Diagonal scrolling can still exceed the budget.
+
+```sh
+FJIRA_SCROLL_BENCHMARK=1 swift test --package-path Packages/FjiraCore --filter BoardCanvasTests/testBoardScrollFrameBudget
 ```
 
 The original logo is in `artwork/F Jira.png`. The rounded macOS icon with transparent

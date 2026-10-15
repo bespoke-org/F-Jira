@@ -8,6 +8,7 @@ import Observation
 final class BrowserModel {
     let connection: CachedConnection
     let issueReader: IssueReader
+    let boardReader: BoardReader
     var queryText = ""
     private(set) var projects: [JiraProject] = []
     private(set) var projectsFetchedAt: Date?
@@ -43,11 +44,23 @@ final class BrowserModel {
         self.connection = connection
         self.cache = cache
         self.client = client
+        boardReader = BoardReader(site: connection.site, account: connection.user.identifier, cache: cache, client: client) {
+            guard let token = try TokenStore().load(site: connection.site.identifier, account: connection.user.identifier) else {
+                throw JiraError.missingToken
+            }
+            return token
+        }
         issueReader = IssueReader(site: connection.site, account: connection.user.identifier, cache: cache, client: client) {
             guard let token = try TokenStore().load(site: connection.site.identifier, account: connection.user.identifier) else {
                 throw JiraError.missingToken
             }
             return token
+        }
+        issueReader.onIssueUpdate = { [weak self] issue in self?.applyKnownIssues([issue]) }
+        boardReader.onIssuesUpdate = { [weak self] issues in self?.applyKnownIssues(issues) }
+        boardReader.onPresentation = { [weak self] images in
+            self?.applyTableImages(images)
+            self?.prefetchTableImages()
         }
     }
 
@@ -98,6 +111,7 @@ final class BrowserModel {
         selectionID = UUID()
         let generation = selectionID
         selectedProjectID = id
+        boardReader.reset()
         search = nil
         history = []
         queryText = ""
@@ -141,6 +155,7 @@ final class BrowserModel {
     }
 
     func stop() {
+        boardReader.reset()
         issueReader.resetNavigation()
         cancelSearch()
         projectTask?.cancel()
@@ -248,6 +263,18 @@ final class BrowserModel {
     private func presentSearch(_ presentation: (search: CachedSearch, images: [String: CachedAvatar])?) {
         applyTableImages(presentation?.images ?? [:])
         search = presentation?.search
+        if let search { applyKnownIssues(search.issues) }
+        prefetchTableImages()
+    }
+
+    private func applyKnownIssues(_ issues: [JiraIssue]) {
+        search = search?.reconciling(issues)
+        history = history.map { $0.reconciling(issues) }
+        boardReader.applyKnownIssues(issues)
+        issueReader.applyKnownIssues(issues)
+    }
+
+    private func prefetchTableImages() {
         attemptedTableImages = []
         // Start type/priority icons first, and limit concurrent image requests for large assignee lists.
         if tableImageTask == nil {
@@ -255,7 +282,9 @@ final class BrowserModel {
                 defer { tableImageTask = nil }
                 var credential: String?
                 while !Task.isCancelled {
-                    let missing = (search?.tableImageURLs ?? []).filter { url in
+                    let urls = boardReader.imageURLs + (search?.tableImageURLs ?? [])
+                    var seen = Set<URL>()
+                    let missing = urls.filter { seen.insert($0).inserted }.filter { url in
                         tableImageDates[url.absoluteString].map { Date().timeIntervalSince($0) >= 86_400 } ?? true
                     }
                     let pending = missing.filter { !attemptedTableImages.contains($0) }

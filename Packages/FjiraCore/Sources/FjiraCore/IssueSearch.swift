@@ -161,10 +161,7 @@ public struct JiraIssue: Codable, Identifiable, Sendable {
     public var priority: String { fields.priority?.name ?? "—" }
     public var issueType: String { fields.issuetype?.name ?? "—" }
     public var updated: Date {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
-        return fields.updated.flatMap(formatter.date(from:)) ?? .distantPast
+        revision ?? .distantPast
     }
 }
 
@@ -186,6 +183,7 @@ public struct CachedSearch: Codable, Sendable {
     public let query: ProjectQuery
     public let generation: UUID
     public var pages: [CachedIssuePage]
+    var issueOverrides: [String: JiraIssue]? = nil
 
     var restoringMetadata: CachedSearch {
         var restored = self
@@ -210,8 +208,9 @@ public struct CachedSearch: Codable, Sendable {
     }
 
     public var issues: [JiraIssue] {
-        var seen = Set<String>()
-        return pages.flatMap(\.page.issues).filter { seen.insert($0.id).inserted }
+        JiraIssue.newest(pages.flatMap(\.page.issues)).map { issue in
+            issueOverrides?[issue.id].map { issue.accepting($0) } ?? issue
+        }
     }
     public var issueTypeIconURLs: [URL] {
         var seen = Set<URL>()

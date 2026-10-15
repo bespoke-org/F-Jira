@@ -138,10 +138,12 @@ public struct JiraClient: Sendable {
         )
     }
 
-    func fetch(_ resource: String, site: JiraSite, token: String, body: Data? = nil, queryItems: [URLQueryItem] = []) async throws -> Data {
+    func fetch(_ resource: String, site: JiraSite, token: String, body: Data? = nil, queryItems: [URLQueryItem] = [], agile: Bool = false, greenhopper: Bool = false) async throws -> Data {
         guard !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !token.contains("\n"), !token.contains("\r") else { throw JiraError.missingToken }
-        guard var components = URLComponents(url: site.endpoint(resource), resolvingAgainstBaseURL: false) else {
+        let endpoint = greenhopper ? site.url.appending(path: "rest/greenhopper/1.0/\(resource)")
+            : (agile ? site.url.appending(path: "rest/agile/1.0/\(resource)") : site.endpoint(resource))
+        guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
             throw JiraError.invalidURL
         }
         if !queryItems.isEmpty { components.queryItems = queryItems }
