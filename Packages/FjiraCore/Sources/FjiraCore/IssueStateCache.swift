@@ -23,6 +23,12 @@ extension ConnectionCache {
 
     static func mergeIssues(_ issues: [JiraIssue], in db: Database, site: String, account: String,
                             verified: Bool = false) throws -> (issues: [JiraIssue], conflicts: [JiraIssue]) {
+        let receivedEpics = Dictionary(issues.compactMap(\.epicLink).filter(\.hasPresentation).map { ($0.key, $0) },
+                                       uniquingKeysWith: { _, latest in latest })
+        for epic in receivedEpics.values {
+            try writeEpic(CachedJiraEpic(epic: epic, response: try JSONEncoder().encode(epic), fetchedAt: Date()),
+                          in: db, site: site, account: account)
+        }
         var known = try knownIssues(issues.map(\.id), in: db, site: site, account: account)
         var conflicts: [JiraIssue] = []
         for issue in issues {
@@ -73,6 +79,14 @@ extension ConnectionCache {
                 if let old = result[value.issue.id] {
                     result[value.issue.id] = value.accepting(old)
                 } else { result[value.issue.id] = value }
+            }
+        }
+        let metadata = try epics(result.values.compactMap { $0.issue.epicLink?.key }, in: db, site: site, account: account)
+        for (id, value) in result {
+            if let link = value.issue.epicLink, let saved = metadata[link.key] {
+                var issue = value.issue
+                issue.epicLink = saved.epic.restoringPresentation(from: link)
+                result[id] = KnownIssue(issue: issue, verified: value.verified)
             }
         }
         return result

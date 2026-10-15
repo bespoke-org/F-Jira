@@ -20,9 +20,9 @@ public struct StatusPill: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .foregroundStyle(color(palette.foreground))
-            .background(color(palette.background), in: RoundedRectangle(cornerRadius: IssuePillStyle.cornerRadius))
+            .background(color(palette.background), in: Capsule())
             .overlay {
-                RoundedRectangle(cornerRadius: IssuePillStyle.cornerRadius)
+                Capsule()
                     .strokeBorder(color(palette.foreground).opacity(palette.borderOpacity), lineWidth: palette.borderWidth)
             }
             .help(name)

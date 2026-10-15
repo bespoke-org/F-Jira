@@ -44,6 +44,7 @@ public final class IssueReader {
     @ObservationIgnored var avatarTask: Task<Void, Never>?
     @ObservationIgnored var remoteLinksTask: Task<Void, Never>?
     @ObservationIgnored var historyTask: Task<Void, Never>?
+    @ObservationIgnored var epicTask: Task<Void, Never>?
     @ObservationIgnored private var historyGeneration: UUID?
     @ObservationIgnored private var recentIssues: [String: IssueSnapshot] = [:]
     @ObservationIgnored private var recentIssueOrder: [String] = []
@@ -157,6 +158,7 @@ public final class IssueReader {
                     isLoading = false
                     currentTask = nil
                     refreshHistoryIfNeeded()
+                    refreshEpicPresentation()
                 }
             }
             do {
@@ -198,6 +200,7 @@ public final class IssueReader {
                     isLoading = false
                     currentTask = nil
                     refreshHistoryIfNeeded()
+                    refreshEpicPresentation()
                 }
             }
             do {
@@ -217,6 +220,35 @@ public final class IssueReader {
                 }
             } catch { handle(error, generation: generation) }
         }
+    }
+
+    private func refreshEpicPresentation() {
+        guard let detail, let link = detail.issue.epicLink else { return }
+        let generation = requestID
+        epicTask = Task {
+            do {
+                let saved = try await cache.loadEpic(site: site.identifier, account: account, key: link.key)
+                try Task.checkCancellation()
+                guard requestID == generation else { return }
+                if let saved { applyEpic(saved.epic) }
+                if let saved, Date().timeIntervalSince(saved.fetchedAt) < 300 { return }
+                let downloaded = try await client.epic(site: site, token: credentials(), key: link.key)
+                try Task.checkCancellation()
+                try await cache.saveEpic(downloaded, site: site.identifier, account: account)
+                guard requestID == generation else { return }
+                applyEpic(downloaded.epic)
+            } catch { /* Keep the cached name or issue key when optional epic metadata is unavailable. */ }
+        }
+    }
+
+    private func applyEpic(_ epic: JiraEpicLink) {
+        guard var detail, detail.issue.epicLink?.key == epic.key else { return }
+        detail.issue.epicLink = epic.restoringPresentation(from: detail.issue.epicLink)
+        self.detail = detail
+        selection = detail.issue.listIssue
+        navigation.replaceCurrent(.issue(detail.issue.listIssue))
+        rememberCurrentIssue()
+        onIssueUpdate?(detail.issue.listIssue)
     }
 
     public func selectActivity(_ tab: IssueActivityTab) {
@@ -295,6 +327,7 @@ public final class IssueReader {
     private func present(_ downloaded: CachedIssueDetail, images: [String: CachedAvatar]) {
         var detail = selection.map { downloaded.reconciling($0, preferOnEqual: false) } ?? downloaded
         if let current = self.detail, current.generation == detail.generation {
+            detail.issue.epicLink = detail.issue.epicLink?.restoringPresentation(from: current.issue.epicLink)
             if let links = current.remoteLinks, links.fetchedAt > (detail.remoteLinks?.fetchedAt ?? .distantPast) {
                 detail.remoteLinks = links
             }
@@ -417,6 +450,8 @@ public final class IssueReader {
 
     private func cancel() {
         currentTask?.cancel()
+        epicTask?.cancel()
+        epicTask = nil
         historyTask?.cancel()
         historyTask = nil
         historyGeneration = nil

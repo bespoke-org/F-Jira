@@ -13,12 +13,17 @@ final class BoardCanvasTests: XCTestCase {
             let configuration = BoardConfiguration.Column(name: name, statuses: [.init(id: String(index))], min: nil, max: nil)
             let issues = try (0..<(index == 0 ? 24 : 3)).map { number in
                 let summaries = ["Improve search results and keyboard navigation", "Cache project images for offline use", "Review the release checklist"]
+                var fields: [String: Any] = [
+                    "summary": summaries[number % summaries.count], "status": ["id": String(index), "name": name],
+                    "issuetype": ["name": "Task"], "priority": ["name": "Medium"],
+                    "assignee": ["name": "alex", "displayName": "Alex"]]
+                if number % 3 != 0 {
+                    fields["epic"] = ["id": 999, "key": "DEMO-999",
+                        "name": number % 2 == 0 ? "Offline access" : "Platform improvements and much longer epic names",
+                        "color": ["key": "color_\(index + 2)"]]
+                }
                 let data = try JSONSerialization.data(withJSONObject: [
-                    "id": "\(index)-\(number)", "key": "DEMO-\(index * 100 + number)",
-                    "fields": ["summary": summaries[number % summaries.count], "status": ["id": String(index), "name": name],
-                               "issuetype": ["name": "Task"], "priority": ["name": "Medium"],
-                               "assignee": ["name": "alex", "displayName": "Alex"]]
-                ])
+                    "id": "\(index)-\(number)", "key": "DEMO-\(index * 100 + number)", "fields": fields])
                 return try JSONDecoder().decode(JiraIssue.self, from: data)
             }
             return BoardColumn(id: index, configuration: configuration, issues: issues)

@@ -1,3 +1,3 @@
 public enum IssuePillStyle {
-    public static let cornerRadius: Double = 8
+    public static let cornerRadius: Double = 999
 }

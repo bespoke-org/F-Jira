@@ -5,7 +5,7 @@ public struct JiraIssueDetail: Codable, Sendable {
     public let key: String
     public internal(set) var fields: Fields
     public let renderedFields: RenderedFields?
-    public let epicLink: JiraEpicLink?
+    public internal(set) var epicLink: JiraEpicLink?
     public let implementer: JiraUser?
     public internal(set) var flagged: Bool?
     public var isFlagged: Bool { flagged == true }
@@ -76,7 +76,7 @@ public struct JiraIssueDetail: Codable, Sendable {
         JiraIssue(id: id, key: key, fields: .init(
             summary: fields.summary, status: fields.status, assignee: fields.assignee,
             priority: fields.priority, updated: fields.updated, issuetype: fields.issuetype
-        ), flagged: flagged)
+        ), flagged: flagged, epicLink: epicLink, hasEpicLinkField: true)
     }
 }
 

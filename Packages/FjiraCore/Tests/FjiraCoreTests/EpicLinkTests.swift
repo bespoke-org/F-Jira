@@ -14,7 +14,8 @@ final class EpicLinkTests: XCTestCase {
         let snapshot = CachedIssueDetail(issue: issue, response: Data(json.utf8), fetchedAt: Date(),
                                          generation: UUID(), commentPages: [], previousComments: [])
         let html = IssueBodyHTML.document(detail: snapshot, baseURL: URL(string: "https://jira.example.com")!, dark: false)
-        XCTAssertTrue(html.contains("<dt>Epic Link</dt><dd><a href=\"fjira://epic/EX-99\">EX-99</a></dd>"))
+        XCTAssertTrue(html.contains("<dt>Epic Link</dt><dd><a class=\"epic-pill\" href=\"fjira://epic/EX-99\""))
+        XCTAssertTrue(html.contains("<span>EX-99</span></a>"))
     }
 
     func testNamesFallbackAndExpandedEpicReference() throws {

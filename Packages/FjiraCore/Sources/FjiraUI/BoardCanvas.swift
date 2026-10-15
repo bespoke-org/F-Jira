@@ -186,10 +186,11 @@ public struct BoardCanvas: View {
 
     private func card(_ issue: JiraIssue) -> some View {
         Button { openIssue(issue) } label: {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: issue.epicLink == nil ? 12 : 6) {
                 Text(issue.summary).font(.system(size: 13))
                     .foregroundStyle(.primary).multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+                if let epic = issue.epicLink { EpicPill(epic: epic) }
                 HStack(spacing: 6) {
                     metadataImage(issue.fields.issuetype?.iconUrl, fallback: "square.dashed", label: issue.issueType)
                     if issue.isFlagged { IssueFlagIndicator() }
@@ -218,7 +219,7 @@ public struct BoardCanvas: View {
             .contentShape(RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(issue.key), \(issue.summary), \(issue.issueType), \(issue.priority), \(issue.assignee)\(issue.isFlagged ? ", Flagged" : "")")
+        .accessibilityLabel("\(issue.key), \(issue.summary), \(issue.issueType), \(issue.priority), \(issue.assignee)\(issue.isFlagged ? ", Flagged" : "")\(issue.epicLink.map { ", Epic: " + $0.displayName } ?? "")")
         .accessibilityAddTraits(selectedKey == issue.key ? [.isSelected] : [])
         .contextMenu {
             Button("Copy issue key") {

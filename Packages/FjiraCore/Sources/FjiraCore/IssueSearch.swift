@@ -135,6 +135,8 @@ public struct JiraIssue: Codable, Identifiable, Sendable {
     public let key: String
     public let fields: Fields
     public internal(set) var flagged: Bool? = nil
+    public internal(set) var epicLink: JiraEpicLink? = nil
+    public internal(set) var hasEpicLinkField: Bool? = nil
     public var isFlagged: Bool { flagged == true }
 
     public struct Fields: Codable, Sendable {
@@ -268,7 +270,7 @@ extension JiraClient {
 }
 
 extension JiraIssue {
-    private enum CodingKeys: String, CodingKey { case id, key, fields, flagged }
+    private enum CodingKeys: String, CodingKey { case id, key, fields, flagged, epicLink, hasEpicLinkField }
 
     public init(from decoder: any Decoder) throws {
         try self.init(from: decoder, names: [:])
@@ -280,6 +282,10 @@ extension JiraIssue {
         key = try values.decode(String.self, forKey: .key)
         fields = try values.decode(Fields.self, forKey: .fields)
         flagged = JiraFlag.decode(from: decoder, names: names)
+        epicLink = (try? values.decodeIfPresent(JiraEpicLink.self, forKey: .epicLink)) ?? JiraEpicLink.decode(from: decoder)
+        let rawFields = try values.nestedContainer(keyedBy: FieldKey.self, forKey: .fields)
+        hasEpicLinkField = try values.decodeIfPresent(Bool.self, forKey: .hasEpicLinkField)
+            ?? (rawFields.contains(FieldKey("epic")) || epicLink != nil ? true : nil)
     }
 }
 
@@ -319,8 +325,8 @@ extension CachedIssuePage {
         let saved = try values.decode(IssuePage.self, forKey: .page)
         response = try values.decode(Data.self, forKey: .response)
         fetchedAt = try values.decode(Date.self, forKey: .fetchedAt)
-        // Older board snapshots retained Agile's flag in the raw response only.
-        if saved.issues.contains(where: { $0.flagged == nil }),
+        // Older board snapshots retained Agile metadata in the raw response only.
+        if saved.issues.contains(where: { $0.flagged == nil || $0.hasEpicLinkField == nil }),
            let original = try? JSONDecoder().decode(IssuePage.self, from: response),
            original.startAt == saved.startAt,
            original.issues.map(\.id) == saved.issues.map(\.id),
@@ -328,6 +334,8 @@ extension CachedIssuePage {
             let issues = zip(saved.issues, original.issues).map { old, raw in
                 var issue = old
                 issue.flagged = old.flagged ?? raw.flagged
+                if old.hasEpicLinkField != true { issue.epicLink = raw.epicLink; issue.hasEpicLinkField = raw.hasEpicLinkField }
+                else { issue.epicLink = old.epicLink?.restoringPresentation(from: raw.epicLink) }
                 return issue
             }
             page = IssuePage(startAt: saved.startAt, maxResults: saved.maxResults, total: saved.total,

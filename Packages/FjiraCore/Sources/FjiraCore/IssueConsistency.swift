@@ -33,7 +33,10 @@ extension JiraIssue {
             status: fields.status?.restoringMetadata(from: other.fields.status), assignee: assignee,
             priority: fields.priority?.restoringMetadata(from: other.fields.priority), updated: fields.updated,
             issuetype: fields.issuetype?.restoringMetadata(from: other.fields.issuetype)),
-            flagged: flagged ?? other.flagged)
+            flagged: flagged ?? other.flagged,
+            epicLink: hasEpicLinkField == true || epicLink != nil
+                ? epicLink?.restoringPresentation(from: other.epicLink) : other.epicLink,
+            hasEpicLinkField: hasEpicLinkField ?? (epicLink != nil ? true : other.hasEpicLinkField))
     }
 
     static func newest(_ issues: [JiraIssue]) -> [JiraIssue] {
@@ -98,6 +101,7 @@ extension JiraIssueDetail {
     fileprivate func replacingListFields(_ latest: JiraIssue) -> JiraIssueDetail {
         var result = self
         result.flagged = latest.flagged
+        result.epicLink = latest.epicLink
         result.fields = Fields(summary: latest.fields.summary, description: fields.description,
             status: latest.fields.status, assignee: latest.fields.assignee, reporter: fields.reporter,
             priority: latest.fields.priority, issuetype: latest.fields.issuetype, resolution: fields.resolution,

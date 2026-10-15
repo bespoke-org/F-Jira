@@ -119,6 +119,7 @@ public struct URLSessionTransport: JiraTransport {
 public struct JiraClient: Sendable {
     let transport: any JiraTransport
     let flagFields = JiraFlagFields()
+    let epicRequests = JiraEpicRequests()
 
     public init(transport: any JiraTransport = URLSessionTransport()) {
         self.transport = transport

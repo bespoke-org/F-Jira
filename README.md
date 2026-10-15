@@ -94,7 +94,9 @@ requests, loaded from Jira's read-only `/rest/api/2/issue/{id}/remotelink` endpo
 External links open in your browser. Their complete responses are cached for offline
 use; failed link refreshes preserve downloaded links and do not block issue content.
 Related issues open in the same viewer. **Epic Link** appears in metadata when an
-issue belongs to an epic; clicking it opens the epic in the same viewer. The field
+issue belongs to an epic, as a pill with its Epic Name and Jira color; clicking it
+opens the epic in the same viewer. Names and colors are shared with board cards
+and cached per account. The field
 is discovered from Jira's schema, with its name used for older cached responses,
 so it supports instance-specific custom-field IDs. Epic links and viewed epic
 contents remain available offline. See
@@ -149,7 +151,10 @@ responses cannot replace the newly selected issue.
 Choose **Boards** in the sidebar and select a board associated with the current
 project. Columns follow Jira's configured names, order, and status mappings.
 Cards retain Jira's rank order and show the issue key, title, type, priority, and
-assignee. Query-based swimlanes use the configured section names and order,
+assignee. Tasks belonging to an epic also show its name in a colored pill, using
+the same palette as the clickable Epic Link in issue details. Epic names and
+colors come from Jira's Agile API and are shared through the offline cache;
+unknown names fall back to the summary or key until metadata is available. Query-based swimlanes use the configured section names and order,
 with a collapsible header and empty sections hidden. Issues enter the first matching
 swimlane; the default section catches the remaining issues. Sections share one
 horizontal scroll position and stack vertically. Section titles, counts, and fold

@@ -15,6 +15,9 @@ actor StubTransport: JiraTransport {
 
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
+        if request.url?.path.contains("/rest/agile/1.0/epic/") == true {
+            return (Data(), HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+        }
         if ["remotelink", "field"].contains(request.url?.lastPathComponent ?? "") {
             return (Data((request.url?.lastPathComponent == "field" ? fieldResponse : "[]").utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         }

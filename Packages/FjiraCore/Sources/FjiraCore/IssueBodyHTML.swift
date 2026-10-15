@@ -40,9 +40,10 @@ public enum IssueBodyHTML {
             h1 { font-size: 20px; line-height: 1.3; margin: 0 0 18px; }
             .metadata { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 7px 14px; margin-bottom: 14px; }
             hr { border: 0; border-top: 1px solid rgba(128,128,128,.3); margin: 18px 0; }
-            .status-pill, .chip { border-radius: \(IssuePillStyle.cornerRadius)px; }
+            .status-pill, .chip, .epic-pill { border-radius: \(IssuePillStyle.cornerRadius)px; }
             .status-pill { display: inline-flex; align-items: center; max-width: 100%; box-sizing: border-box; padding: 3px 8px; font-size: 12px; font-weight: 500; line-height: 16px; }
-            .status-pill > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .status-pill > span, .epic-pill > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .epic-pill { display: inline-flex; max-width: 100%; box-sizing: border-box; padding: 3px 8px; font-size: 12px; font-weight: 500; line-height: 16px; text-decoration: none; vertical-align: middle; }
             \(statusStyles)
             .metadata dt { opacity: .65; } .metadata dd { margin: 0; }
             .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
@@ -84,7 +85,7 @@ public enum IssueBodyHTML {
             code { background: rgba(128,128,128,.12); padding: 1px 4px; border-radius: 3px; }
             pre code { background: none; padding: 0; }
             </style></head><body>
-            \(metadata(detail, images: avatars, personPlaceholderDataURL: personPlaceholderDataURL))
+            \(metadata(detail, dark: dark, images: avatars, personPlaceholderDataURL: personPlaceholderDataURL))
             <hr class="description-divider">
             \(description)
             \(issueLinks(detail, error: issueLinksError))
@@ -163,7 +164,7 @@ public enum IssueBodyHTML {
             .replacingOccurrences(of: "'", with: "&#39;")
     }
 
-    private static func metadata(_ detail: CachedIssueDetail, images: [String: CachedAvatar], personPlaceholderDataURL: String?) -> String {
+    private static func metadata(_ detail: CachedIssueDetail, dark: Bool, images: [String: CachedAvatar], personPlaceholderDataURL: String?) -> String {
         let issue = detail.issue.listIssue
         let fields = detail.issue.fields
         var rows = [
@@ -177,8 +178,8 @@ public enum IssueBodyHTML {
         }
         if let reporter = fields.reporter { rows.append(("Reporter", personValue(reporter, fallback: "Unknown", images: images, placeholderDataURL: personPlaceholderDataURL))) }
         if let epic = detail.issue.epicLink {
-            let title = epic.summary.map { "\(epic.key): \($0)" } ?? epic.key
-            rows.append(("Epic Link", "<a href=\"fjira://epic/\(escape(epic.key))\">\(escape(title))</a>"))
+            let palette = JiraEpicPalette(colorKey: epic.color?.key).palette(dark: dark)
+            rows.append(("Epic Link", "<a class=\"epic-pill\" href=\"fjira://epic/\(escape(epic.key))\" title=\"\(escape(epic.displayName)) (\(escape(epic.key)))\" style=\"background: \(palette.backgroundCSS); color: \(palette.foregroundCSS); box-shadow: inset 0 0 0 \(palette.borderWidth)px \(palette.borderCSS)\"><span>\(escape(epic.pillTitle))</span></a>"))
         }
         if let created = fields.created { rows.append(("Created", escape(date(created)))) }
         if let updated = fields.updated { rows.append(("Updated", escape(date(updated)))) }

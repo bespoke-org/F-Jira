@@ -67,6 +67,7 @@ final class IssueViewportTests: XCTestCase {
         let lines = (0..<40).map { "<p>Comment line \($0)</p>" }.joined()
         let object: [String: Any] = ["id":"100", "key":"EX-1", "fields": [
             "status": ["name": "QA & Review", "statusCategory": ["key": "indeterminate", "colorName": "yellow"]],
+            "epic": ["id": 999, "key": "EX-99", "name": "Platform & tools", "color": ["key": "color_2"]],
             "summary":"Fixture", "components": [["name":"Engine"], ["name":"API"]],
             "assignee": ["name": "alice", "displayName": "Alice Assignee", "avatarUrls": ["48x48": "https://jira.example.com/avatar/alice.png"]],
             "reporter": ["name": "bob", "displayName": "Bob Reporter", "avatarUrls": ["48x48": "https://jira.example.com/avatar/bob.png"]],
@@ -129,10 +130,14 @@ final class IssueViewportTests: XCTestCase {
         XCTAssertEqual(iconSize, "16")
         let vectorLoaded = try await evaluate(content, "String(document.querySelector('.metadata-icon')?.naturalWidth ?? 0)")
         XCTAssertEqual(vectorLoaded, "16", "SVG Jira icons must actually render")
+        let epicName = try await evaluate(content, "document.querySelector('.epic-pill')?.textContent ?? ''")
+        XCTAssertEqual(epicName, "Platform & tools")
+        let epicBackground = try await evaluate(content, "getComputedStyle(document.querySelector('.epic-pill')).backgroundColor")
+        let dark = content.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        XCTAssertEqual(epicBackground, dark ? "rgb(72, 52, 30)" : "rgb(255, 241, 224)")
         let statusName = try await evaluate(content, "document.querySelector('.status-pill')?.textContent ?? ''")
         XCTAssertEqual(statusName, "QA & Review")
         let statusBackground = try await evaluate(content, "getComputedStyle(document.querySelector('.status-pill')).backgroundColor")
-        let dark = content.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         XCTAssertEqual(statusBackground, dark ? "rgb(28, 58, 94)" : "rgb(222, 235, 255)")
 
 
