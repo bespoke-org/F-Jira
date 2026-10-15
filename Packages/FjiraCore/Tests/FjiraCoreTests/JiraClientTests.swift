@@ -6,15 +6,17 @@ actor StubTransport: JiraTransport {
     private var requests: [URLRequest] = []
     private var responseIndex = 0
     let responses: [(Int, Data)]
+    let fieldResponse: String
 
-    init(_ responses: [(Int, String)]) {
+    init(_ responses: [(Int, String)], fieldResponse: String = "[]") {
+        self.fieldResponse = fieldResponse
         self.responses = responses.map { ($0.0, Data($0.1.utf8)) }
     }
 
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
-        if request.url?.lastPathComponent == "remotelink" {
-            return (Data("[]".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        if ["remotelink", "field"].contains(request.url?.lastPathComponent ?? "") {
+            return (Data((request.url?.lastPathComponent == "field" ? fieldResponse : "[]").utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         }
         let index = responseIndex
         responseIndex += 1

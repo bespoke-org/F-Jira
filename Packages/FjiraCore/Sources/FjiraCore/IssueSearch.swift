@@ -134,6 +134,8 @@ public struct JiraIssue: Codable, Identifiable, Sendable {
     public let id: String
     public let key: String
     public let fields: Fields
+    public internal(set) var flagged: Bool? = nil
+    public var isFlagged: Bool { flagged == true }
 
     public struct Fields: Codable, Sendable {
         public let summary: String?
@@ -246,10 +248,14 @@ extension JiraClient {
             let startAt: Int
             let maxResults = 50
             let validateQuery = true
-            let fields = ["summary", "status", "assignee", "priority", "updated", "issuetype", "project"]
+            let fields: [String]
+            let expand = ["names"]
         }
         guard startAt >= 0 else { throw SearchError.inconsistentPagination }
-        let body = try JSONEncoder().encode(Request(jql: query.jql, startAt: startAt))
+        let flags = await flagFields.ids(client: self, site: site, token: token)
+        try Task.checkCancellation()
+        let fields = ["summary", "status", "assignee", "priority", "updated", "issuetype", "project"] + flags
+        let body = try JSONEncoder().encode(Request(jql: query.jql, startAt: startAt, fields: fields))
         let data = try await fetch("search", site: site, token: token, body: body)
         let page: IssuePage = try decode(data)
         guard page.startAt == startAt, page.maxResults > 0,
@@ -258,5 +264,74 @@ extension JiraClient {
             throw SearchError.inconsistentPagination
         }
         return CachedIssuePage(page: page, response: data, fetchedAt: Date())
+    }
+}
+
+extension JiraIssue {
+    private enum CodingKeys: String, CodingKey { case id, key, fields, flagged }
+
+    public init(from decoder: any Decoder) throws {
+        try self.init(from: decoder, names: [:])
+    }
+
+    init(from decoder: any Decoder, names: [String: String]) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        key = try values.decode(String.self, forKey: .key)
+        fields = try values.decode(Fields.self, forKey: .fields)
+        flagged = JiraFlag.decode(from: decoder, names: names)
+    }
+}
+
+extension IssuePage {
+    private enum CodingKeys: String, CodingKey { case startAt, maxResults, total, issues, warningMessages, names }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        startAt = try values.decode(Int.self, forKey: .startAt)
+        maxResults = try values.decode(Int.self, forKey: .maxResults)
+        total = try values.decodeIfPresent(Int.self, forKey: .total)
+        warningMessages = try values.decodeIfPresent([String].self, forKey: .warningMessages)
+        let names = (try? values.decode([String: String].self, forKey: .names)) ?? [:]
+        var contents = try values.nestedUnkeyedContainer(forKey: .issues)
+        var decoded: [JiraIssue] = []
+        while !contents.isAtEnd {
+            decoded.append(try JiraIssue(from: contents.superDecoder(), names: names))
+        }
+        issues = decoded
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(startAt, forKey: .startAt)
+        try values.encode(maxResults, forKey: .maxResults)
+        try values.encodeIfPresent(total, forKey: .total)
+        try values.encode(issues, forKey: .issues)
+        try values.encodeIfPresent(warningMessages, forKey: .warningMessages)
+    }
+}
+
+extension CachedIssuePage {
+    private enum CodingKeys: String, CodingKey { case page, response, fetchedAt }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let saved = try values.decode(IssuePage.self, forKey: .page)
+        response = try values.decode(Data.self, forKey: .response)
+        fetchedAt = try values.decode(Date.self, forKey: .fetchedAt)
+        // Older board snapshots retained Agile's flag in the raw response only.
+        if saved.issues.contains(where: { $0.flagged == nil }),
+           let original = try? JSONDecoder().decode(IssuePage.self, from: response),
+           original.startAt == saved.startAt,
+           original.issues.map(\.id) == saved.issues.map(\.id),
+           original.issues.map(\.key) == saved.issues.map(\.key) {
+            let issues = zip(saved.issues, original.issues).map { old, raw in
+                var issue = old
+                issue.flagged = old.flagged ?? raw.flagged
+                return issue
+            }
+            page = IssuePage(startAt: saved.startAt, maxResults: saved.maxResults, total: saved.total,
+                             issues: issues, warningMessages: saved.warningMessages)
+        } else { page = saved }
     }
 }

@@ -134,6 +134,25 @@ final class BoardCanvasTests: XCTestCase {
         XCTAssertGreaterThan(outer.contentView.bounds.origin.y, 0)
         outer.contentView.scroll(to: .zero)
         outer.reflectScrolledClipView(outer.contentView)
+        window.setContentSize(NSSize(width: 350, height: 800))
+        try await Task.sleep(for: .milliseconds(100))
+        host.layoutSubtreeIfNeeded()
+        let headerRect = NSRect(x: 16, y: host.isFlipped ? 12 : host.bounds.height - 42, width: 300, height: 30)
+        let headerBefore = try capture(host, rect: headerRect)
+        let horizontal = try XCTUnwrap(scrollViews(host).first { $0.hasHorizontalScroller })
+        horizontal.contentView.scroll(to: NSPoint(x: 600, y: 0))
+        horizontal.reflectScrolledClipView(horizontal.contentView)
+        try await Task.sleep(for: .milliseconds(100))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(horizontal.contentView.bounds.origin.x, 500)
+        XCTAssertEqual(try capture(host, rect: headerRect), headerBefore,
+                       "The swimlane title, count, and disclosure arrow must stay in place during horizontal scrolling")
+        let headerPoint = NSPoint(x: 32, y: host.isFlipped ? 26 : host.bounds.height - 26)
+        click(host.convert(headerPoint, to: nil), in: window)
+        try await Task.sleep(for: .milliseconds(100))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(scrollViews(host).filter(\.hasVerticalScroller).count, 9,
+                       "The pinned header must remain clickable after scrolling")
         if let path = ProcessInfo.processInfo.environment["FJIRA_SWIMLANE_PREVIEW_PATH"],
            let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
             host.cacheDisplay(in: host.bounds, to: bitmap)
@@ -264,6 +283,12 @@ final class BoardCanvasTests: XCTestCase {
             print("SCROLL_BENCHMARK \(name) median=\(timings[timings.count / 2])ms p95=\(p95)ms max=\(timings.last!)ms")
             XCTAssertLessThan(p95, 1000 / 120, "\(name) scrolling exceeds the 120 Hz frame budget")
         }
+    }
+
+    private func capture(_ view: NSView, rect: NSRect) throws -> Data {
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: rect))
+        view.cacheDisplay(in: rect, to: bitmap)
+        return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
     }
 
     private func laneHeaderPoint(above column: NSScrollView) -> NSPoint {

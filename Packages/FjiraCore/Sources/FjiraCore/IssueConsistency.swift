@@ -32,7 +32,8 @@ extension JiraIssue {
         return JiraIssue(id: id, key: key, fields: Fields(summary: fields.summary,
             status: fields.status?.restoringMetadata(from: other.fields.status), assignee: assignee,
             priority: fields.priority?.restoringMetadata(from: other.fields.priority), updated: fields.updated,
-            issuetype: fields.issuetype?.restoringMetadata(from: other.fields.issuetype)))
+            issuetype: fields.issuetype?.restoringMetadata(from: other.fields.issuetype)),
+            flagged: flagged ?? other.flagged)
     }
 
     static func newest(_ issues: [JiraIssue]) -> [JiraIssue] {
@@ -96,6 +97,7 @@ extension CachedIssueDetail {
 extension JiraIssueDetail {
     fileprivate func replacingListFields(_ latest: JiraIssue) -> JiraIssueDetail {
         var result = self
+        result.flagged = latest.flagged
         result.fields = Fields(summary: latest.fields.summary, description: fields.description,
             status: latest.fields.status, assignee: latest.fields.assignee, reporter: fields.reporter,
             priority: latest.fields.priority, issuetype: latest.fields.issuetype, resolution: fields.resolution,
@@ -110,8 +112,12 @@ extension JiraClient {
     /// Verify a conflicting index result without downloading comments and rendered descriptions.
     func issueSummary(site: JiraSite, token: String, id: String) async throws -> JiraIssue {
         guard Self.validIssueIdentifier(id) else { throw JiraError.invalidResponse }
+        let flags = await flagFields.ids(client: self, site: site, token: token)
+        try Task.checkCancellation()
+        let fields = ["summary", "status", "assignee", "priority", "updated", "issuetype"] + flags
         let response = try await fetch("issue/\(id)", site: site, token: token, queryItems: [
-            URLQueryItem(name: "fields", value: "summary,status,assignee,priority,updated,issuetype")
+            URLQueryItem(name: "fields", value: fields.joined(separator: ",")),
+            URLQueryItem(name: "expand", value: "names")
         ])
         let issue: JiraIssue = try decode(response)
         guard issue.id == id || issue.key == id else { throw JiraError.invalidResponse }

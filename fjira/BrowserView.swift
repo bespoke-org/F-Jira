@@ -305,6 +305,7 @@ struct BrowserView: View {
                                 .frame(width: 16, height: 16)
                                 .help(issue.issueType).accessibilityLabel(issue.issueType)
                         }
+                        if issue.isFlagged { IssueFlagIndicator() }
                         Text(issue.summary).lineLimit(1).help(issue.summary)
                     }
                 }.width(min: 220, ideal: 380)
@@ -403,6 +404,10 @@ struct BrowserView: View {
         let canSearch = !showingBoards && model.selectedProject != nil && !model.isRestoring
             && !model.isLoadingCache && !model.isSearching
         return JiraCommandContext([
+            .toggleSidebar: JiraCommandAction {
+                sidebarVisibility = sidebarVisibility == .detailOnly ? .all : .detailOnly
+            },
+            .closeIssue: JiraCommandAction(isEnabled: model.issueReader.selection != nil) { closeIssue() },
             .goBack: JiraCommandAction(isEnabled: model.issueReader.canGoBack) { model.issueReader.goBack() },
             .goForward: JiraCommandAction(isEnabled: model.issueReader.canGoForward) { model.issueReader.goForward() },
             .openInJira: JiraCommandAction(isEnabled: currentIssue != nil || board != nil) {

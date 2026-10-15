@@ -26,11 +26,12 @@ public struct IssueDetailView: View {
         VStack(spacing: 0) {
             HStack {
                 Text(issue?.key ?? "Issue").font(.custom("Menlo", size: 13, relativeTo: .headline).weight(.semibold)).textSelection(.enabled)
+                if issue?.isFlagged == true { IssueFlagIndicator() }
                 Spacer()
                 if reader.isLoading && reader.detail == nil { ProgressView().controlSize(.small) }
                 JiraCommandIconButton(.refresh, context: commandContext)
                 JiraCommandIconButton(.openInJira, context: commandContext)
-                Button(action: close) { Image(systemName: "xmark") }.help("Close issue")
+                JiraCommandIconButton(.closeIssue, context: commandContext)
             }
             .buttonStyle(.borderless).padding(16)
             Divider()
@@ -78,6 +79,7 @@ public struct IssueDetailView: View {
 
     private var commandContext: JiraCommandContext {
         commands ?? JiraCommandContext([
+            .closeIssue: JiraCommandAction { close() },
             .refresh: JiraCommandAction(isEnabled: reader.selection != nil && !reader.isLoading) { reader.refresh() },
             .openInJira: JiraCommandAction(isEnabled: reader.selection != nil) { openInJira() }
         ])

@@ -21,7 +21,7 @@ public struct IssueBrowserLayout<Issues: View, Detail: View>: View {
             if usesSidePane && isIssuePresented {
                 detail()
                     .ignoresSafeArea(.container, edges: .top)
-                    .frame(minWidth: 380, idealWidth: 440, maxWidth: 600)
+                    .frame(minWidth: 380, idealWidth: 440, maxWidth: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

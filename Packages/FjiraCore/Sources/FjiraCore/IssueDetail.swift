@@ -7,9 +7,11 @@ public struct JiraIssueDetail: Codable, Sendable {
     public let renderedFields: RenderedFields?
     public let epicLink: JiraEpicLink?
     public let implementer: JiraUser?
+    public internal(set) var flagged: Bool?
+    public var isFlagged: Bool { flagged == true }
     public let hasImplementerField: Bool
 
-    private enum CodingKeys: String, CodingKey { case id, key, fields, renderedFields, epicLink, implementer, hasImplementerField }
+    private enum CodingKeys: String, CodingKey { case id, key, fields, renderedFields, epicLink, implementer, hasImplementerField, flagged }
 
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -18,6 +20,7 @@ public struct JiraIssueDetail: Codable, Sendable {
         fields = try values.decode(Fields.self, forKey: .fields)
         renderedFields = try values.decodeIfPresent(RenderedFields.self, forKey: .renderedFields)
         epicLink = (try? values.decodeIfPresent(JiraEpicLink.self, forKey: .epicLink)) ?? JiraEpicLink.decode(from: decoder)
+        flagged = JiraFlag.decode(from: decoder)
         let custom = Self.decodeImplementer(from: decoder)
         implementer = (try? values.decodeIfPresent(JiraUser.self, forKey: .implementer)) ?? custom.user
         hasImplementerField = (try? values.decode(Bool.self, forKey: .hasImplementerField))
@@ -73,7 +76,7 @@ public struct JiraIssueDetail: Codable, Sendable {
         JiraIssue(id: id, key: key, fields: .init(
             summary: fields.summary, status: fields.status, assignee: fields.assignee,
             priority: fields.priority, updated: fields.updated, issuetype: fields.issuetype
-        ))
+        ), flagged: flagged)
     }
 }
 

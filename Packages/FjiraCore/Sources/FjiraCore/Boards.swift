@@ -303,7 +303,7 @@ extension JiraClient {
             URLQueryItem(name: "startAt", value: String(startAt)),
             URLQueryItem(name: "maxResults", value: "50"),
             URLQueryItem(name: "jql", value: filter),
-            URLQueryItem(name: "fields", value: "summary,status,assignee,priority,updated,issuetype,project")
+            URLQueryItem(name: "fields", value: "summary,status,assignee,priority,updated,issuetype,project,flagged")
         ], agile: true)
         let page: IssuePage = try decode(data)
         guard page.startAt == startAt, page.maxResults > 0,

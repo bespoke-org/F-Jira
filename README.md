@@ -64,12 +64,18 @@ The browsing migration preserves existing connections and tokens.
 ## Issue details
 
 Click an issue row to open its details. When the list area is at least 940 points
-wide, details appear alongside it in a resizable pane. In narrower windows, they
-open in a sheet. Resizing transfers the same issue between these presentations.
+wide, details appear alongside it in a resizable pane. Drag the divider to widen
+the details up to the available space, leaving at least 500 points for the list
+or board. In narrower windows, details open in a sheet. Resizing transfers the same issue between these presentations.
 Use the close button to return to the list.
 
 The viewer includes metadata, formatted description and comments, labels,
 components, fix versions, subtasks, issue links, and attachment metadata.
+Flagged issues show a red flag in the table, board cards, and detail header; board
+cards also get a pale yellow tint. Flag state is cached for offline viewing. The
+search discovers the instance-specific Flagged custom field automatically, while
+boards use Jira Agile’s flag value.
+
 Statuses use tinted pills in the table and issue metadata: gray for To Do/unknown,
 blue for In Progress, and green for Done, based on Jira's status category. The
 status name stays visible, with matching light and dark palettes. Older cached
@@ -137,7 +143,9 @@ Cards retain Jira's rank order and show the issue key, title, type, priority, an
 assignee. Query-based swimlanes use the configured section names and order,
 with a collapsible header and empty sections hidden. Issues enter the first matching
 swimlane; the default section catches the remaining issues. Sections share one
-horizontal scroll position and stack vertically. Each column scrolls vertically.
+horizontal scroll position and stack vertically. Section titles, counts, and fold
+buttons stay at the left edge while columns scroll horizontally. Each column
+scrolls vertically.
 When only one section is expanded, it fills the remaining board height beneath
 the section headers and grows or shrinks with the window. Multiple open sections
 keep compact column heights and scroll together vertically.
@@ -220,8 +228,10 @@ The built application is `build/Build/Products/Debug/F Jira.app`.
 
 Keyboard commands are defined in `FjiraUI/JiraCommands.swift`. Cmd+O opens the
 current issue in Jira; Cmd+R refreshes the open issue or reruns the search when
-no issue is open. Cmd+Return runs the search. The Jira menu owns the bindings,
-and buttons share their actions, availability, and shortcut tooltips through
+no issue is open. Cmd+Return runs the search. Cmd+B toggles the sidebar. Cmd+W
+closes the current issue, or closes the window when no issue is open. Close lives
+in the File menu to replace the system Cmd+W binding; other shortcuts live in the
+Jira menu. Buttons share their actions, availability, and shortcut tooltips through
 `JiraCommandContext`. Each browser window supplies its context with
 `focusedSceneValue`, so commands work from the table, search field, and issue
 body and are disabled outside the browser. To add a command, add its identity

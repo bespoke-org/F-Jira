@@ -72,7 +72,7 @@ extension ConnectionCache {
         // Recover the immutable issue fields without losing cached pages or remote links.
         guard saved.issue.fields.issuetype?.iconUrl == nil || saved.issue.fields.priority?.iconUrl == nil
                 || saved.issue.fields.status?.statusCategory == nil || saved.issue.epicLink == nil
-                || !saved.issue.hasImplementerField || saved.issue.implementer == nil,
+                || !saved.issue.hasImplementerField || saved.issue.implementer == nil || saved.issue.flagged == nil,
               let original = try? JSONDecoder().decode(JiraIssueDetail.self, from: saved.response),
               original.id == saved.issue.id, original.key == saved.issue.key,
               (saved.issue.fields.issuetype?.iconUrl == nil && original.fields.issuetype?.iconUrl != nil)
@@ -80,7 +80,8 @@ extension ConnectionCache {
                 || (saved.issue.fields.status?.statusCategory == nil && original.fields.status?.statusCategory != nil)
                 || (saved.issue.epicLink == nil && original.epicLink != nil)
                 || (!saved.issue.hasImplementerField && original.hasImplementerField)
-                || (saved.issue.implementer == nil && original.implementer != nil) else { return saved }
+                || (saved.issue.implementer == nil && original.implementer != nil)
+                || (saved.issue.flagged == nil && original.flagged != nil) else { return saved }
         var recovered = CachedIssueDetail(issue: original, response: saved.response, fetchedAt: saved.fetchedAt,
                                           generation: saved.generation, commentPages: saved.commentPages,
                                           previousComments: saved.previousComments)

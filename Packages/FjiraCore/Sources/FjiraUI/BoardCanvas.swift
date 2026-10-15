@@ -6,6 +6,7 @@ public struct BoardCanvas: View {
     private let columns: [BoardColumn]
     private let lanes: [BoardLane]
     @State private var collapsedLanes = Set<Int>()
+    @Namespace private var horizontalViewport
     private let images: [String: NSImage]
     private let selectedKey: String?
     private let openIssue: (JiraIssue) -> Void
@@ -34,6 +35,8 @@ public struct BoardCanvas: View {
     public var body: some View {
         GeometryReader { geometry in
             let width = columnWidth(available: geometry.size.width)
+            let headerWidth = max(0, min(geometry.size.width, canvasWidth(columnWidth: width)) - 24)
+            let viewport = horizontalViewport
             let visibleLanes = lanes.filter { !$0.isEmpty }
             let expandedIndices = visibleLanes.indices.filter { !collapsedLanes.contains(visibleLanes[$0].id) }
             let fillingLane = expandedIndices.count == 1 ? expandedIndices.first : nil
@@ -70,7 +73,12 @@ public struct BoardCanvas: View {
                                         .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
+                                    .frame(width: headerWidth, alignment: .leading)
                                     .fixedSize(horizontal: false, vertical: true)
+                                    .visualEffect { content, geometry in
+                                        // Counter horizontal scrolling without rebuilding the board on every frame.
+                                        content.offset(x: 12 - geometry.frame(in: .named(viewport)).minX)
+                                    }
                                     .accessibilityValue(collapsedLanes.contains(lane.id) ? "Collapsed" : "Expanded")
                                     if !collapsedLanes.contains(lane.id) {
                                         HStack(alignment: .top, spacing: 12) {
@@ -91,6 +99,7 @@ public struct BoardCanvas: View {
                     .frame(width: canvasWidth(columnWidth: width), height: geometry.size.height)
                 }
             }
+            .coordinateSpace(name: viewport)
         }
     }
 
@@ -178,6 +187,7 @@ public struct BoardCanvas: View {
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
                     metadataImage(issue.fields.issuetype?.iconUrl, fallback: "square.dashed", label: issue.issueType)
+                    if issue.isFlagged { IssueFlagIndicator() }
                     Text(issue.key).font(.custom("Menlo", size: 11))
                         .foregroundStyle(.secondary).lineLimit(1)
                     Spacer(minLength: 4)
@@ -187,7 +197,13 @@ public struct BoardCanvas: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+            .background {
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .overlay {
+                        if issue.isFlagged { RoundedRectangle(cornerRadius: 7).fill(Color.yellow.opacity(0.14)) }
+                    }
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: 7)
                     .strokeBorder(selectedKey == issue.key ? Color.accentColor : Color.primary.opacity(0.09),
@@ -197,7 +213,7 @@ public struct BoardCanvas: View {
             .contentShape(RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(issue.key), \(issue.summary), \(issue.issueType), \(issue.priority), \(issue.assignee)")
+        .accessibilityLabel("\(issue.key), \(issue.summary), \(issue.issueType), \(issue.priority), \(issue.assignee)\(issue.isFlagged ? ", Flagged" : "")")
         .accessibilityAddTraits(selectedKey == issue.key ? [.isSelected] : [])
         .contextMenu {
             Button("Copy issue key") {

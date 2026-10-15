@@ -118,6 +118,7 @@ public struct URLSessionTransport: JiraTransport {
 
 public struct JiraClient: Sendable {
     let transport: any JiraTransport
+    let flagFields = JiraFlagFields()
 
     public init(transport: any JiraTransport = URLSessionTransport()) {
         self.transport = transport

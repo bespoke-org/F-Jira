@@ -1,14 +1,17 @@
+import AppKit
 import SwiftUI
 
 /// Command identity and presentation live here; each window supplies its own actions.
 public enum JiraCommand: String, CaseIterable, Identifiable {
-    case goBack, goForward, openInJira, refresh, search
+    case goBack, goForward, toggleSidebar, closeIssue, openInJira, refresh, search
 
     public var id: Self { self }
     public var title: String {
         switch self {
         case .goBack: "Back"
         case .goForward: "Forward"
+        case .toggleSidebar: "Toggle Sidebar"
+        case .closeIssue: "Close Issue"
         case .openInJira: "Open in Jira"
         case .refresh: "Refresh"
         case .search: "Search"
@@ -18,6 +21,8 @@ public enum JiraCommand: String, CaseIterable, Identifiable {
         switch self {
         case .goBack: "chevron.left"
         case .goForward: "chevron.right"
+        case .toggleSidebar: "sidebar.left"
+        case .closeIssue: "xmark"
         case .openInJira: "arrow.up.right.square"
         case .refresh: "arrow.clockwise"
         case .search: "magnifyingglass"
@@ -27,6 +32,8 @@ public enum JiraCommand: String, CaseIterable, Identifiable {
         switch self {
         case .goBack: .leftArrow
         case .goForward: .rightArrow
+        case .toggleSidebar: "b"
+        case .closeIssue: "w"
         case .openInJira: "o"
         case .refresh: "r"
         case .search: .return
@@ -89,8 +96,19 @@ public struct JiraCommands: Commands {
     public init() {}
 
     public var body: some Commands {
+        // Replace the standard Close item so Cmd+W has exactly one owner.
+        CommandGroup(replacing: .saveItem) {
+            Button(context?.isEnabled(.closeIssue) == true ? JiraCommand.closeIssue.title : "Close Window") {
+                if context?.isEnabled(.closeIssue) == true {
+                    context?.perform(.closeIssue)
+                } else {
+                    NSApp.sendAction(#selector(NSWindow.performClose(_:)), to: nil, from: nil)
+                }
+            }
+            .keyboardShortcut(JiraCommand.closeIssue.key, modifiers: JiraCommand.closeIssue.modifiers)
+        }
         CommandMenu("Jira") {
-            ForEach(JiraCommand.allCases) { command in
+            ForEach(JiraCommand.allCases.filter { $0 != .closeIssue }) { command in
                 Button(command.title) { context?.perform(command) }
                     .keyboardShortcut(command.key, modifiers: command.modifiers)
                     .disabled(context?.isEnabled(command) != true)
