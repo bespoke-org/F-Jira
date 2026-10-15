@@ -38,6 +38,10 @@ final class BoardCanvasTests: XCTestCase {
             host.cacheDisplay(in: host.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
         }
+        for scroll in scrollViews(host) {
+            XCTAssertEqual(scroll.horizontalScrollElasticity, .none)
+            XCTAssertEqual(scroll.verticalScrollElasticity, .none)
+        }
         let vertical = scrollViews(host).filter { $0.hasVerticalScroller }
         XCTAssertEqual(vertical.count, 4)
         let first = try XCTUnwrap(vertical.first)
@@ -151,6 +155,10 @@ final class BoardCanvasTests: XCTestCase {
         click(host.convert(headerPoint, to: nil), in: window)
         try await Task.sleep(for: .milliseconds(100))
         host.layoutSubtreeIfNeeded()
+        for scroll in scrollViews(host) {
+            XCTAssertEqual(scroll.horizontalScrollElasticity, .none)
+            XCTAssertEqual(scroll.verticalScrollElasticity, .none)
+        }
         XCTAssertEqual(scrollViews(host).filter(\.hasVerticalScroller).count, 9,
                        "The pinned header must remain clickable after scrolling")
         if let path = ProcessInfo.processInfo.environment["FJIRA_SWIMLANE_PREVIEW_PATH"],
