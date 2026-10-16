@@ -25,7 +25,7 @@ struct BoardToolbar: ToolbarContent {
             ToolbarItem(placement: .primaryAction) {
                 filterField
                     .frame(height: 36)
-                    .glassEffect(.regular, in: Capsule())
+                    .background(ToolbarGlassBackground())
             }
             .sharedBackgroundVisibility(.hidden)
         } else {
@@ -35,7 +35,7 @@ struct BoardToolbar: ToolbarContent {
         }
         if #available(macOS 26.0, *) {
             ToolbarItem(placement: .primaryAction) {
-                assigneeMenu.glassEffect(.regular.interactive(), in: Circle())
+                assigneeMenu.background(ToolbarGlassBackground())
             }
             .sharedBackgroundVisibility(.hidden)
         } else {
@@ -96,17 +96,6 @@ struct BoardToolbar: ToolbarContent {
     }
 
     private var filterField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .frame(width: 16, height: 16)
-                .accessibilityHidden(true)
-            TextField("Filter cards", text: $reader.filterText)
-                .textFieldStyle(.plain)
-        }
-        .padding(.horizontal, 10)
-        .frame(width: 150)
-        .help("Filter downloaded cards by issue key or title")
+        BoardFilterField(text: $reader.filterText)
     }
 }
