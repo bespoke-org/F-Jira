@@ -194,11 +194,10 @@ unknown names fall back to the summary or key until metadata is available. Query
 with a collapsible header and empty sections hidden. Issues enter the first matching
 swimlane; the default section catches the remaining issues. Sections share one
 horizontal scroll position and stack vertically. Section titles, counts, and fold
-buttons stay at the left edge while columns scroll horizontally. Each column
-scrolls vertically.
-When only one section is expanded, it fills the remaining board height beneath
-the section headers and grows or shrinks with the window. Multiple open sections
-keep compact column heights and scroll together vertically.
+buttons stay at the left edge while columns scroll horizontally. Each section
+takes the height of its tallest column, and all columns in that section share
+that height. Cards do not scroll independently: the whole board scrolls horizontally
+and vertically, with native overscroll. Folding a section hides its columns.
 Click a card to open the same issue detail pane used by Issues.
 
 Kanban boards apply their configured subquery and the board's cutoff for older

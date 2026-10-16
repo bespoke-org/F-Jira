@@ -6,7 +6,7 @@ import XCTest
 
 @MainActor
 final class BoardCanvasTests: XCTestCase {
-    func testBoardScrollsHorizontallyAndColumnsKeepLongListsInsideViewport() async throws {
+    func testWholeBoardScrollsBothAxesWithoutColumnScrollViews() async throws {
         _ = NSApplication.shared
         let names = ["To do", "In progress", "Review", "Done"]
         let columns = try names.enumerated().map { index, name in
@@ -44,10 +44,12 @@ final class BoardCanvasTests: XCTestCase {
             try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
         }
         let vertical = scrollViews(host).filter { $0.hasVerticalScroller }
-        XCTAssertEqual(vertical.count, 4)
+        XCTAssertEqual(vertical.count, 1, "Only the whole board should scroll vertically")
         let first = try XCTUnwrap(vertical.first)
         XCTAssertGreaterThan(first.documentView!.frame.height, first.contentView.bounds.height)
         XCTAssertLessThanOrEqual(first.frame.height, 650)
+        XCTAssertGreaterThan(first.documentView!.frame.height, 2000,
+                             "The full tallest column must determine the board height")
         first.contentView.scroll(to: NSPoint(x: 0, y: 200))
         first.reflectScrolledClipView(first.contentView)
         XCTAssertGreaterThan(first.contentView.bounds.origin.y, 0)
@@ -93,10 +95,11 @@ final class BoardCanvasTests: XCTestCase {
         }
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertTrue(requests.isEmpty, "Horizontal scrolling must not drain Done's remaining pages")
-        let done = try XCTUnwrap(scrollViews(host).filter { $0.hasVerticalScroller }.last)
+        let done = try XCTUnwrap(scrollViews(host).first { $0.hasVerticalScroller })
+        XCTAssertTrue(done === horizontal, "Both axes belong to one board scroll view")
         for _ in 0..<10 {
             let bottom = max(0, done.documentView!.frame.height - done.contentView.bounds.height)
-            done.contentView.scroll(to: NSPoint(x: 0, y: bottom))
+            done.contentView.scroll(to: NSPoint(x: 500, y: bottom))
             done.reflectScrolledClipView(done.contentView)
             host.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(30))
@@ -132,6 +135,7 @@ final class BoardCanvasTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         XCTAssertEqual(scrollViews(host).filter(\.hasHorizontalScroller).count, 1,
                        "All swimlanes must keep their columns aligned in one horizontal viewport")
+        XCTAssertEqual(scrollViews(host).count, 1, "Columns and lanes must not have nested scroll views")
         let outer = try XCTUnwrap(scrollViews(host).first { $0.hasVerticalScroller })
         XCTAssertGreaterThan(outer.documentView!.frame.height, outer.contentView.bounds.height)
         outer.contentView.scroll(to: NSPoint(x: 0, y: 400))
@@ -152,12 +156,14 @@ final class BoardCanvasTests: XCTestCase {
         XCTAssertGreaterThan(horizontal.contentView.bounds.origin.x, 500)
         XCTAssertEqual(try capture(host, rect: headerRect), headerBefore,
                        "The swimlane title, count, and disclosure arrow must stay in place during horizontal scrolling")
+        let expandedHeight = horizontal.documentView!.frame.height
         let headerPoint = NSPoint(x: 32, y: host.isFlipped ? 26 : host.bounds.height - 26)
         click(host.convert(headerPoint, to: nil), in: window)
         try await Task.sleep(for: .milliseconds(100))
         host.layoutSubtreeIfNeeded()
-        XCTAssertEqual(scrollViews(host).filter(\.hasVerticalScroller).count, 9,
-                       "The pinned header must remain clickable after scrolling")
+        XCTAssertEqual(scrollViews(host).count, 1)
+        XCTAssertLessThan(horizontal.documentView!.frame.height, expandedHeight - 80,
+                          "Clicking the pinned header must fold the section after horizontal scrolling")
         if let path = ProcessInfo.processInfo.environment["FJIRA_SWIMLANE_PREVIEW_PATH"],
            let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
             host.cacheDisplay(in: host.bounds, to: bitmap)
@@ -165,12 +171,12 @@ final class BoardCanvasTests: XCTestCase {
         }
     }
 
-    func testOnlyExpandedSwimlaneFillsRemainingViewportAndResizes() async throws {
+    func testLaneHeightFollowsTallestColumnAndCollapsingRemovesItsContents() async throws {
         _ = NSApplication.shared
-        let lanes = try ["Expedite", "Regular work", "Improvements"].enumerated().map { laneIndex, name in
+        let lanes = try ["Regular work", "Expedite", "Improvements"].enumerated().map { laneIndex, name in
             let columns = try (0..<4).map { columnIndex in
                 let config = BoardConfiguration.Column(name: "Stage \(columnIndex)", statuses: [.init(id: String(columnIndex))], min: nil, max: nil)
-                let issues = try (0..<(laneIndex == 1 ? 20 : 1)).map { number in
+                let issues = try (0..<(laneIndex == 0 && columnIndex == 0 ? 20 : 1)).map { number in
                     let data = try JSONSerialization.data(withJSONObject: [
                         "id": "\(laneIndex)-\(columnIndex)-\(number)", "key": "DEMO-\(laneIndex * 100 + columnIndex * 20 + number)",
                         "fields": ["summary": "A card in \(name)"]])
@@ -190,45 +196,29 @@ final class BoardCanvasTests: XCTestCase {
         defer { window.contentView = nil; window.close() }
         try await Task.sleep(for: .milliseconds(200))
         host.layoutSubtreeIfNeeded()
-
-        let initialColumns = scrollViews(host).filter(\.hasVerticalScroller).dropFirst()
-        let firstColumn = try XCTUnwrap(initialColumns.first)
-        let firstHeaderPoint = laneHeaderPoint(above: firstColumn)
-        click(firstHeaderPoint, in: window)
-        try await Task.sleep(for: .milliseconds(100))
-        host.layoutSubtreeIfNeeded()
-        XCTAssertEqual(scrollViews(host).filter(\.hasVerticalScroller).count, 9)
-        let lastColumn = try XCTUnwrap(scrollViews(host).filter(\.hasVerticalScroller).suffix(4).first)
-        click(laneHeaderPoint(above: lastColumn), in: window)
-        try await Task.sleep(for: .milliseconds(100))
-        host.layoutSubtreeIfNeeded()
-        let vertical = scrollViews(host).filter(\.hasVerticalScroller)
-        XCTAssertEqual(vertical.count, 5, "Only the four columns in the expanded swimlane should remain")
-        let outer = try XCTUnwrap(vertical.first)
-        let column = try XCTUnwrap(vertical.dropFirst().first)
-        let initialHeight = column.frame.height
-        XCTAssertGreaterThan(initialHeight, outer.contentSize.height - 220,
-                             "The remaining swimlane should fill the viewport below its headers")
-        XCTAssertLessThanOrEqual(outer.documentView!.frame.height, outer.contentSize.height + 2,
-                                 "All three headers and the expanded columns should fit without outer scrolling")
-        XCTAssertGreaterThan(column.documentView!.frame.height, column.contentSize.height,
-                             "Long columns must still scroll independently")
+        XCTAssertEqual(scrollViews(host).count, 1)
+        let board = try XCTUnwrap(scrollViews(host).first)
+        let expandedHeight = try XCTUnwrap(board.documentView).frame.height
+        XCTAssertGreaterThan(expandedHeight, 1800, "All cards must fit inside the section without an inner scrollbar")
 
         window.setContentSize(NSSize(width: 1100, height: 800))
-        try await Task.sleep(for: .milliseconds(150))
+        try await Task.sleep(for: .milliseconds(100))
         host.layoutSubtreeIfNeeded()
-        XCTAssertEqual(initialHeight - column.frame.height, 200, accuracy: 2,
-                       "The sole expanded swimlane should resize with the window")
-        XCTAssertLessThanOrEqual(outer.documentView!.frame.height, outer.contentSize.height + 2)
+        XCTAssertEqual(board.documentView!.frame.height, expandedHeight, accuracy: 1,
+                       "Changing viewport height must not change content-driven section heights")
 
-        // The first collapsed header remains at the top after resizing.
         let top = NSPoint(x: 32, y: host.isFlipped ? 26 : host.bounds.height - 26)
         click(host.convert(top, to: nil), in: window)
         try await Task.sleep(for: .milliseconds(100))
         host.layoutSubtreeIfNeeded()
-        XCTAssertEqual(scrollViews(host).filter(\.hasVerticalScroller).count, 9)
-        XCTAssertGreaterThan(outer.documentView!.frame.height, outer.contentSize.height,
-                             "Multiple expanded swimlanes should remain vertically scrollable")
+        XCTAssertLessThan(board.documentView!.frame.height, expandedHeight - 1400,
+                          "Folding the long section must remove its full column height")
+        XCTAssertEqual(scrollViews(host).count, 1)
+        click(host.convert(top, to: nil), in: window)
+        try await Task.sleep(for: .milliseconds(100))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(board.documentView!.frame.height, expandedHeight, accuracy: 1,
+                       "Unfolding restores all cards at their original height")
     }
 
     func testBoardScrollFrameBudget() async throws {
@@ -294,12 +284,6 @@ final class BoardCanvasTests: XCTestCase {
         let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: rect))
         view.cacheDisplay(in: rect, to: bitmap)
         return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-    }
-
-    private func laneHeaderPoint(above column: NSScrollView) -> NSPoint {
-        // The column's scroll view starts below its 40-point title and the swimlane header.
-        let frame = column.convert(column.bounds, to: nil)
-        return NSPoint(x: frame.minX + 20, y: frame.maxY + 64)
     }
 
     private func click(_ point: NSPoint, in window: NSWindow) {
