@@ -41,67 +41,63 @@ public struct BoardCanvas: View {
             let expandedIndices = visibleLanes.indices.filter { !collapsedLanes.contains(visibleLanes[$0].id) }
             let fillingLane = expandedIndices.count == 1 ? expandedIndices.first : nil
             ScrollView(.horizontal) {
-                Group {
-                    if lanes.isEmpty {
-                        HStack(alignment: .top, spacing: 12) {
-                            ForEach(columns) { column in
-                                columnView(column)
-                                    .frame(width: width, height: max(0, geometry.size.height - 24))
-                            }
+                if lanes.isEmpty {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(columns) { column in
+                            columnView(column)
+                                .frame(width: width, height: max(0, geometry.size.height - 24))
                         }
-                        .padding(12)
-                    } else {
-                        ScrollView(.vertical) {
-                            // Keep lane containers stable while the board moves. Lazy lane layout
-                            // repeatedly remeasures their nested column scroll views at the viewport edge.
-                            // Individual card lists remain lazy and paginated.
-                            BoardSwimlaneLayout(viewportHeight: max(0, geometry.size.height - 24), fillingLane: fillingLane) {
-                                ForEach(visibleLanes) { lane in
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        Button {
-                                            if collapsedLanes.contains(lane.id) { collapsedLanes.remove(lane.id) }
-                                            else { collapsedLanes.insert(lane.id) }
-                                        } label: {
-                                            HStack(spacing: 8) {
-                                                Image(systemName: collapsedLanes.contains(lane.id) ? "chevron.right" : "chevron.down")
-                                                    .font(.system(size: 11, weight: .semibold)).frame(width: 14)
-                                                Text(lane.name).font(.headline)
-                                                Text(lane.total.map { "\($0) issues" } ?? "\(lane.columns.reduce(0) { $0 + $1.issues.count }) downloaded")
-                                                    .font(.caption).foregroundStyle(.secondary)
-                                                Spacer()
-                                            }
-                                            .padding(.horizontal, 4).padding(.vertical, 6)
-                                            .contentShape(Rectangle())
+                    }
+                    .padding(12)
+                } else {
+                    ScrollView(.vertical) {
+                        // Keep lane containers stable while the board moves. Lazy lane layout
+                        // repeatedly remeasures their nested column scroll views at the viewport edge.
+                        // Individual card lists remain lazy and paginated.
+                        BoardSwimlaneLayout(viewportHeight: max(0, geometry.size.height - 24), fillingLane: fillingLane) {
+                            ForEach(visibleLanes) { lane in
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Button {
+                                        if collapsedLanes.contains(lane.id) { collapsedLanes.remove(lane.id) }
+                                        else { collapsedLanes.insert(lane.id) }
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: collapsedLanes.contains(lane.id) ? "chevron.right" : "chevron.down")
+                                                .font(.system(size: 11, weight: .semibold)).frame(width: 14)
+                                            Text(lane.name).font(.headline)
+                                            Text(lane.total.map { "\($0) issues" } ?? "\(lane.columns.reduce(0) { $0 + $1.issues.count }) downloaded")
+                                                .font(.caption).foregroundStyle(.secondary)
+                                            Spacer()
                                         }
-                                        .buttonStyle(.plain)
-                                        .frame(width: headerWidth, alignment: .leading)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .visualEffect { content, geometry in
-                                            // Counter horizontal scrolling without rebuilding the board on every frame.
-                                            content.offset(x: 12 - geometry.frame(in: .named(viewport)).minX)
-                                        }
-                                        .accessibilityValue(collapsedLanes.contains(lane.id) ? "Collapsed" : "Expanded")
-                                        if !collapsedLanes.contains(lane.id) {
-                                            HStack(alignment: .top, spacing: 12) {
-                                                ForEach(lane.columns) { column in
-                                                    columnView(column)
-                                                        .frame(width: width, height: fillingLane == nil ? laneHeight(lane, available: geometry.size.height) : nil)
-                                                }
+                                        .padding(.horizontal, 4).padding(.vertical, 6)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .frame(width: headerWidth, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .visualEffect { content, geometry in
+                                        // Counter horizontal scrolling without rebuilding the board on every frame.
+                                        content.offset(x: 12 - geometry.frame(in: .named(viewport)).minX)
+                                    }
+                                    .accessibilityValue(collapsedLanes.contains(lane.id) ? "Collapsed" : "Expanded")
+                                    if !collapsedLanes.contains(lane.id) {
+                                        HStack(alignment: .top, spacing: 12) {
+                                            ForEach(lane.columns) { column in
+                                                columnView(column)
+                                                    .frame(width: width, height: fillingLane == nil ? laneHeight(lane, available: geometry.size.height) : nil)
                                             }
                                         }
                                     }
                                 }
-                                if lanes.allSatisfy(\.isEmpty) {
-                                    Text("No matching issues").foregroundStyle(.secondary).padding(24)
-                                }
                             }
-                            .padding(12)
-                            .background(BoardScrollBoundary())
+                            if lanes.allSatisfy(\.isEmpty) {
+                                Text("No matching issues").foregroundStyle(.secondary).padding(24)
+                            }
                         }
-                        .frame(width: canvasWidth(columnWidth: width), height: geometry.size.height)
+                        .padding(12)
                     }
+                    .frame(width: canvasWidth(columnWidth: width), height: geometry.size.height)
                 }
-                .background(BoardScrollBoundary())
             }
             .coordinateSpace(name: viewport)
         }
@@ -141,7 +137,6 @@ public struct BoardCanvas: View {
             ScrollView(.vertical) {
                 LazyVStack(spacing: 8) { columnContents(column) }
                 .padding(8)
-                .background(BoardScrollBoundary())
             }
         }
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
