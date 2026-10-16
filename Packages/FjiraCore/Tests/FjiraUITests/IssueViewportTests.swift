@@ -74,7 +74,7 @@ final class IssueViewportTests: XCTestCase {
             "issuetype": ["name": "Task", "iconUrl": "https://jira.example.com/icons/task.svg"],
             "priority": ["name": "High", "iconUrl": "https://jira.example.com/icons/high.svg"],
             "comment": ["comments": [["id":"c1", "body":"Comment", "author":["displayName":"Tester", "name":"tester"]]]]
-        ], "renderedFields": ["description":"<p>Description</p>", "comment": ["comments": [["id":"c1", "body":lines]]]]]
+        ], "renderedFields": ["description":"<p>Description</p><ul><li>[ ] Checklist item</li><li><span class=\"error\">&#91;x&#93;</span> Completed item</li><li>Ordinary item</li></ul>", "comment": ["comments": [["id":"c1", "body":lines]]]]]
         let transport = FixtureTransport(data: try JSONSerialization.data(withJSONObject: object))
         let site = try JiraSite("https://jira.example.com")
         let client = JiraClient(transport: transport)
@@ -111,6 +111,30 @@ final class IssueViewportTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(100))
         host.layoutSubtreeIfNeeded()
         XCTAssertLessThanOrEqual(content.frame.height, 300, "The web view must stay inside the issue viewport")
+        let checklist = try await evaluate(content, """
+            JSON.stringify([...document.querySelectorAll('.task-checkbox')].map(input => ({
+                checked: input.checked, disabled: input.disabled,
+                visible: input.getBoundingClientRect().width > 0,
+                bullet: getComputedStyle(input.closest('li')).listStyleType
+            })))
+            """)
+        XCTAssertEqual(checklist, #"[{"checked":false,"disabled":true,"visible":true,"bullet":"none"},{"checked":true,"disabled":true,"visible":true,"bullet":"none"}]"#)
+        let alignedChecklist = try await evaluate(content, """
+            String([...document.querySelectorAll('.task-checkbox')].every(input => {
+                const item = input.closest('li');
+                const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT);
+                let text;
+                while ((text = walker.nextNode()) && !text.textContent.trim()) {}
+                const range = document.createRange();
+                range.setStart(text, text.textContent.search(/\\S/));
+                range.setEnd(text, text.textContent.length);
+                return Math.abs(range.getBoundingClientRect().left - item.getBoundingClientRect().left) < 1
+                    && input.getBoundingClientRect().right < item.getBoundingClientRect().left;
+            }))
+            """)
+        XCTAssertEqual(alignedChecklist, "true", "Checkboxes belong in the marker gutter, without adding text indentation")
+        let afterClick = try await evaluate(content, "const box = document.querySelector('.task-checkbox'); box.click(); String(box.checked)")
+        XCTAssertEqual(afterClick, "false", "Read-only checklist items must not appear to edit Jira")
         let scrollable = try await evaluate(content, "String(document.documentElement.scrollHeight > window.innerHeight)")
         XCTAssertEqual(scrollable, "true", "Long comments must scroll inside the bounded viewport")
         _ = try await evaluate(content, "window.scrollTo(0, document.documentElement.scrollHeight); 'done'")

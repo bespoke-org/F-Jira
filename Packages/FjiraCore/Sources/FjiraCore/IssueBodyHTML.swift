@@ -61,6 +61,9 @@ public enum IssueBodyHTML {
             th, td { border: 1px solid #888; padding: 6px; }
             img { max-width: 100%; height: auto; }
             img.emoticon, img.emoji { width: 16px; height: 16px; vertical-align: text-bottom; }
+            .task-checkbox { width: 14px; height: 14px; margin: 0 6px 0 0; vertical-align: -2px; accent-color: \(dark ? "#75baff" : "#0066cc"); color-scheme: \(dark ? "dark" : "light"); }
+            li.task-list-item, li:has(> .task-checkbox), li:has(> :is(p, span) .task-checkbox) { list-style-type: none; position: relative; }
+            li > .task-checkbox, li > :is(p, span) .task-checkbox { position: absolute; inset-inline-start: -22px; top: 3px; margin: 0; }
             blockquote { border-left: 3px solid #888; margin-left: 0; padding-left: 12px; }
             .activity { margin-top: 20px; border: 1px solid rgba(128,128,128,.3); border-radius: 10px; overflow: hidden; }
             .activity-tabs { display: flex; gap: 8px; padding: 0 12px; background: rgba(128,128,128,.06); border-bottom: 1px solid rgba(128,128,128,.25); }
@@ -236,10 +239,11 @@ public enum IssueBodyHTML {
             let clickable = ["https", "http"].contains(url.scheme?.lowercased() ?? "")
                 && url.host != nil && url.user == nil && url.password == nil
             let anchor = clickable ? "<a href=\"\(escape(url.absoluteString))\">\(title)</a>" : title
-            let context = [link.relationship, link.application?.name, link.object.status?.resolved == true ? "Resolved" : nil]
+            let relationship = link.relationship?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let context = [relationship.isEmpty ? "links to" : relationship, link.application?.name, link.object.status?.resolved == true ? "Resolved" : nil]
                 .compactMap { $0 }.filter { !$0.isEmpty }.map(escape).joined(separator: " · ")
             let summary = link.object.summary.map { "<div class=\"muted\">\(escape($0))</div>" } ?? ""
-            let label = context.isEmpty ? "" : "<span class=\"muted issue-link-label\">\(context)</span> "
+            let label = "<span class=\"muted issue-link-label\">\(context)</span> "
             return "<div class=\"remote-link related\">\(label)\(anchor)\(summary)</div>"
         }.joined()
         let notice = error.map { "<p class=\"muted\">\(escape($0))</p>" } ?? ""

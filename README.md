@@ -276,6 +276,17 @@ corners is in `artwork/F Jira App Icon.png`. Run `python3 scripts/generate-app-i
 to regenerate the macOS app-icon catalog, standalone iconset, and `artwork/F Jira.icns`.
 The built application is `build/Build/Products/Debug/F Jira.app`.
 
+For a persistent development entry in Applications, run this once from the repository root:
+
+```sh
+mkdir -p "$HOME/Applications"
+ln -s "$PWD/build/Build/Products/Debug/F Jira.app" "$HOME/Applications/F Jira.app"
+```
+
+This link opens the build directly, so rebuilding with the command above updates
+it automatically. Quit and reopen F Jira to run a new build. Keep the checkout at
+its current path; after cleaning the build directory, rebuild before launching.
+
 Keyboard commands are defined in `FjiraUI/JiraCommands.swift`. Cmd+O opens the
 current issue in Jira; Cmd+R refreshes the open issue or reruns the search when
 no issue is open. Cmd+Return runs the search. Cmd+B toggles the sidebar. Cmd+W

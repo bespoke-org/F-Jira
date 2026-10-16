@@ -18,7 +18,7 @@ public enum JiraRichText {
             return literalBreaks(token).replacingOccurrences(of: "\r\n", with: "\n")
                 .replacingOccurrences(of: "\r", with: "\n").replacingOccurrences(of: "\n", with: "<br>\n")
         }.joined()
-        return normalizeSpacing(rendered)
+        return renderChecklists(normalizeSpacing(rendered))
     }
 
     public static func wiki(_ source: String) -> String {
@@ -54,10 +54,15 @@ public enum JiraRichText {
                 continue
             }
             closeTable()
-            if let match = line.range(of: #"^[*#]+\s+"#, options: .regularExpression) {
+            if let match = line.range(of: #"^(?:[*#]+|-(?=\s+\[[ xX]\](?:\s|$)))\s+"#, options: .regularExpression) {
                 let kind = line.first == "#" ? "ol" : "ul"
                 if list != kind { closeList(); output += "<\(kind)>"; list = kind }
-                output += "<li>\(inline(String(line[match.upperBound...])))</li>"
+                let body = String(line[match.upperBound...])
+                if let item = checklistPrefix(body, allowBare: true) {
+                    output += "<li class=\"task-list-item\">\(item.checkbox) \(inline(item.body))</li>"
+                } else {
+                    output += "<li>\(inline(body))</li>"
+                }
                 continue
             }
             closeList()
@@ -70,6 +75,52 @@ public enum JiraRichText {
         }
         closeList(); closeTable()
         return output
+    }
+
+    private static let htmlTokens = try! NSRegularExpression(pattern: #"<(?:[^>"']|"[^"]*"|'[^']*')*>|[^<]+|<"#)
+    private static let htmlTagName = try! NSRegularExpression(pattern: #"^<\s*/?\s*([a-zA-Z0-9]+)"#)
+    private static let taskMarker = try! NSRegularExpression(pattern: #"^(?:\s|&nbsp;|&#160;)*(?:([-*])(?:\s|&nbsp;|&#160;)+)?\[([ xX])\](?:(?:\s|&nbsp;|&#160;)+|$)"#)
+
+    private static let renderedTaskMarker = try! NSRegularExpression(pattern: #"^(?:\s|&nbsp;|&#160;)*(?:([-*])(?:\s|&nbsp;|&#160;)+)?(?:\[|&#0*91;|&#[xX]0*5[bB];|&lbrack;)([ xX])(?:\]|&#0*93;|&#[xX]0*5[dD];|&rbrack;)(?:(?:\s|&nbsp;|&#160;)+|$)"#)
+
+    private static func checklistPrefix(_ text: String, allowBare: Bool, rendered: Bool = false) -> (checkbox: String, body: String)? {
+        let marker = rendered ? renderedTaskMarker : taskMarker
+        guard let match = marker.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              allowBare || match.range(at: 1).location != NSNotFound,
+              let range = Range(match.range, in: text),
+              let state = Range(match.range(at: 2), in: text) else { return nil }
+        let checked = text[state].lowercased() == "x"
+        let checkbox = "<input class=\"task-checkbox\" type=\"checkbox\" disabled\(checked ? " checked" : "") aria-label=\"\(checked ? "Completed" : "Not completed")\">"
+        return (checkbox, String(text[range.upperBound...]))
+    }
+
+    private static func renderChecklists(_ html: String) -> String {
+        var protectedDepth = 0
+        var listDepth = 0
+        var lineStart = true
+        return htmlTokens.matches(in: html, range: NSRange(html.startIndex..., in: html)).map { match in
+            let token = String(html[Range(match.range, in: html)!])
+            if token.hasPrefix("<") {
+                guard let tagMatch = htmlTagName.firstMatch(in: token, range: NSRange(token.startIndex..., in: token)),
+                      let nameRange = Range(tagMatch.range(at: 1), in: token) else { return token }
+                let name = token[nameRange].lowercased()
+                let closing = token.range(of: #"^<\s*/"#, options: .regularExpression) != nil
+                if ["pre", "code", "tt", "script", "style", "a"].contains(name) {
+                    protectedDepth = max(0, protectedDepth + (closing ? -1 : 1))
+                    lineStart = false
+                }
+                if protectedDepth == 0 {
+                    if name == "li" { listDepth = max(0, listDepth + (closing ? -1 : 1)) }
+                    if ["li", "p", "div", "br", "ul", "ol", "blockquote"].contains(name) { lineStart = true }
+                }
+                return token
+            }
+            guard protectedDepth == 0 else { return token }
+            let item = lineStart ? checklistPrefix(token, allowBare: listDepth > 0, rendered: true) : nil
+            if !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { lineStart = false }
+            if let item { return item.checkbox + " " + item.body }
+            return token
+        }.joined()
     }
 
     private static let codeBlocks = try! NSRegularExpression(

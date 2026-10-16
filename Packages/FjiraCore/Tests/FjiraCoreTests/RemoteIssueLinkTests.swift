@@ -6,6 +6,33 @@ private let linkedIssueJSON = #"{"id":"100","key":"EX-1","fields":{"summary":"Is
 private let remoteMRJSON = #"[{"id":42,"application":{"name":"GitLab","type":"gitlab"},"relationship":"relates to","object":{"url":"https://gitlab.example.com/team/repo/-/merge_requests/42","title":"MR !42 & fix","summary":"Fix <edge case>","status":{"resolved":true},"extra":"retained"}}]"#
 
 final class RemoteIssueLinkTests: XCTestCase {
+    func testRemoteLinkRelationshipDefaultsToLinksToWhenMissingOrBlank() async throws {
+        let site = try JiraSite("https://jira.example.com")
+        var detail = try await JiraClient(transport: RemoteLinkFixtureTransport())
+            .issue(site: site, token: "token", id: "100")
+        let cases: [(field: String, expected: String)] = [
+            ("", "links to"),
+            (#""relationship":null,"#, "links to"),
+            (#""relationship":"","#, "links to"),
+            (#""relationship":" \n\t ","#, "links to"),
+            (#""relationship":"mentioned in","#, "mentioned in"),
+            (#""relationship":"relates to <review>","#, "relates to &lt;review&gt;")
+        ]
+        for item in cases {
+            let response = Data("""
+                [{"id":42,\(item.field)"object":{"url":"https://example.com/review","title":"Review"}}]
+                """.utf8)
+            let links = try JSONDecoder().decode([RemoteIssueLink].self, from: response)
+            detail.remoteLinks = CachedRemoteIssueLinks(links: links, response: response, fetchedAt: Date())
+            // Reopen the cached payload as well: the fallback must not require a network refresh.
+            let restored = try JSONDecoder().decode(CachedIssueDetail.self, from: JSONEncoder().encode(detail))
+            for dark in [false, true] {
+                let html = IssueBodyHTML.document(detail: restored, baseURL: site.url, dark: dark)
+                XCTAssertTrue(html.contains("<span class=\"muted issue-link-label\">\(item.expected)</span> <a href=\"https://example.com/review\">Review</a>"), item.field)
+            }
+        }
+    }
+
     func testLoadsRemoteLinksWithContextPathAndPreservesRawResponse() async throws {
         let transport = RemoteLinkFixtureTransport()
         let links = try await JiraClient(transport: transport).remoteIssueLinks(
@@ -66,6 +93,7 @@ final class RemoteIssueLinkTests: XCTestCase {
         XCTAssertTrue(html.contains("<h2>Issue Links</h2>"))
         XCTAssertTrue(html.contains("EX-2: Related issue"))
         XCTAssertTrue(html.contains("MR !42 &amp; fix"))
+        XCTAssertTrue(html.contains("<span class=\"muted issue-link-label\">relates to · GitLab · Resolved</span>"))
         XCTAssertTrue(html.contains("href=\"https://gitlab.example.com/team/repo/-/merge_requests/42\""))
         XCTAssertTrue(html.contains("Fix &lt;edge case&gt;"))
         XCTAssertTrue(html.contains("<hr class=\"description-divider\">"))
