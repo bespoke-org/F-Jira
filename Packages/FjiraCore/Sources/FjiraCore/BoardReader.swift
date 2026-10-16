@@ -187,7 +187,8 @@ public final class BoardReader {
     }
 
     public func refresh() {
-        guard let board = selectedBoard else { refreshBoards(); return }
+        refreshBoards()
+        guard let board = selectedBoard else { return }
         beginLoading(board: board, restore: snapshot == nil)
     }
 

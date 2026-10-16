@@ -19,28 +19,19 @@ struct BoardToolbar: ToolbarContent {
             .disabled(reader.boards.isEmpty)
             .help("Select a board")
         }
-        ToolbarItem(placement: .primaryAction) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Filter cards", text: $reader.filterText)
-                    .textFieldStyle(.plain)
+        if #available(macOS 26.0, *) {
+            ToolbarItem(placement: .primaryAction) {
+                filterControls
+                    .frame(height: 36)
+                    .glassEffect(.regular, in: Capsule())
             }
-            .frame(width: 150)
-            .help("Filter downloaded cards by issue key or title")
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Toggle(isOn: $reader.onlyMyIssues) {
-                Label("Only my issues", systemImage: "person.crop.circle")
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .primaryAction) {
+                filterControls.frame(height: 28)
             }
-            .toggleStyle(.button)
-            .help("Only my issues")
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            Menu {
-                Button("Refresh board list", systemImage: "arrow.clockwise") { reader.refreshBoards() }
-                    .disabled(reader.isLoadingBoards)
-            } label: { Label("Board options", systemImage: "ellipsis") }
-            .help("Board options")
             if reader.isLoading || reader.isLoadingBoards {
                 ProgressView().controlSize(.small)
                     .frame(width: 32, height: 28)
@@ -48,5 +39,35 @@ struct BoardToolbar: ToolbarContent {
             }
             JiraCommandIconButton(.refresh, context: commands)
         }
+    }
+
+    private var filterControls: some View {
+        HStack(spacing: 0) {
+            filterField
+            Toggle(isOn: $reader.onlyMyIssues) {
+                Label("Only my issues", systemImage: "person.crop.circle")
+            }
+            .labelStyle(.iconOnly)
+            .toggleStyle(.button)
+            .buttonStyle(.borderless)
+            .frame(width: 32, height: 28)
+            .padding(.trailing, 4)
+            .help("Only my issues")
+        }
+    }
+
+    private var filterField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(width: 16, height: 16)
+                .accessibilityHidden(true)
+            TextField("Filter cards", text: $reader.filterText)
+                .textFieldStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .frame(width: 150)
+        .help("Filter downloaded cards by issue key or title")
     }
 }

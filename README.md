@@ -215,7 +215,8 @@ offline, including older cards beyond the refreshed first page. Older results ar
 identified in the paging footer until their pages are refreshed. Filters search
 all downloaded cards; use **Load more** explicitly while filtering to fetch more.
 Failed refreshes preserve the previous board, and failed next-page requests can
-be retried without skipping cards. Board options include refreshing the board list.
+be retried without skipping cards. The board refresh button updates both the current
+board and the available board list.
 
 Issue fields are shared between board cards, search results, and full details.
 The newest Jira `updated` timestamp wins, so a stale node response cannot roll a
@@ -234,7 +235,7 @@ board's cutoff, and avoid showing an exact total for an affected incomplete
 column. This mitigates inconsistent Jira indexes; it cannot discover issues
 omitted by the server or re-evaluate arbitrary board/swimlane JQL locally.
 
-Cmd+R refreshes the board when no issue is open, and Cmd+O opens the board in Jira.
+Cmd+R refreshes the board and board list when no issue is open, and Cmd+O opens the board in Jira.
 With an issue open, those commands apply to the issue. Switching boards or views
 resets issue navigation history. This version supports viewing boards; dragging
 cards, editing, Jira quick filters, and grouping by epics, stories, projects, or
@@ -260,11 +261,16 @@ xcodebuild -project fjira.xcodeproj -scheme fjira -configuration Debug -destinat
 swift test --package-path Packages/FjiraCore
 ```
 
-An opt-in board benchmark scrolls a 94-card fixture horizontally, vertically, and
-diagonally, reporting median, p95, and maximum main-thread update times. It checks
+An opt-in board benchmark scrolls a 150-card fixture across four swimlanes,
+with avatars, epic pills, and varied title lengths. It scrolls horizontally,
+vertically, and diagonally, reporting median, p95, and maximum main-thread update times. It checks
 an 8.33 ms p95 budget and requires a visible desktop. These are CPU layout/display
 measurements, not measured display FPS; results vary with system load. The regular
-test suite skips this benchmark. Diagonal scrolling can still exceed the budget.
+test suite skips this benchmark. It does not measure compositor delays or presented
+frames; investigate visible stutter with an Animation Hitches trace and a real-board
+comparison even when this CPU benchmark passes. Board cards flatten their artwork
+into a drawing group to reduce layer-compositing work during scrolling, while
+keeping buttons, accessibility, and context menus interactive.
 
 ```sh
 FJIRA_SCROLL_BENCHMARK=1 swift test --package-path Packages/FjiraCore --filter BoardCanvasTests/testBoardScrollFrameBudget

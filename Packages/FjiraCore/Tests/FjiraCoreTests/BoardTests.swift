@@ -153,7 +153,13 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(requests.filter { $0.url?.lastPathComponent == "issue" }.map { query($0, "startAt") }, ["0", "0", "1"])
         await transport.failDoneColumn()
         reader.refresh()
-        try await eventually { !reader.isLoading }
+        XCTAssertTrue(reader.isLoadingBoards)
+        XCTAssertTrue(reader.isLoading)
+        try await eventually { !reader.isLoading && !reader.isLoadingBoards }
+        let refreshedRequests = await transport.requests
+        XCTAssertEqual(refreshedRequests.filter { $0.url?.lastPathComponent == "board" }.count, 2,
+                       "Refreshing the current board must also fetch the available board list")
+        XCTAssertNil(reader.listError, "A failed issue refresh must not prevent the board list from refreshing")
         XCTAssertEqual(reader.snapshot?.issues.map(\.key), ["NEW-1", "NEW-2"])
         XCTAssertEqual(reader.snapshot?.isComplete, true)
         XCTAssertNotNil(reader.errorMessage)

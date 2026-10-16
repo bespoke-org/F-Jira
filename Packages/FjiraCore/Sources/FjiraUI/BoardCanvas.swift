@@ -199,6 +199,9 @@ public struct BoardCanvas: View {
                                   lineWidth: selectedKey == issue.key ? 2 : 0.5)
             }
             .shadow(color: .black.opacity(0.06), radius: 1, y: 1)
+            // Flatten card artwork so scrolling composites one image instead of all its layers.
+            // The button, accessibility, and context menu remain outside the drawing group.
+            .drawingGroup()
             .contentShape(RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)

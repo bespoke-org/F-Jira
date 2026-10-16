@@ -28,7 +28,9 @@ final class BoardCanvasTests: XCTestCase {
             }
             return BoardColumn(id: index, configuration: configuration, issues: issues)
         }
-        let canvas = BoardCanvas(columns: columns, images: [:], selectedKey: "DEMO-100", openIssue: { _ in })
+        var openedKeys: [String] = []
+        let canvas = BoardCanvas(columns: columns, images: [:], selectedKey: "DEMO-100",
+                                 openIssue: { openedKeys.append($0.key) })
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 650),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -43,6 +45,9 @@ final class BoardCanvasTests: XCTestCase {
             host.cacheDisplay(in: host.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
         }
+        let cardPoint = NSPoint(x: 100, y: host.isFlipped ? 100 : host.bounds.height - 100)
+        click(host.convert(cardPoint, to: nil), in: window)
+        XCTAssertEqual(openedKeys, ["DEMO-0"], "Rasterizing card artwork must preserve the issue button")
         let vertical = scrollViews(host).filter { $0.hasVerticalScroller }
         XCTAssertEqual(vertical.count, 1, "Only the whole board should scroll vertically")
         let first = try XCTUnwrap(vertical.first)
@@ -226,14 +231,32 @@ final class BoardCanvasTests: XCTestCase {
             throw XCTSkip("Opt-in scrolling benchmark; requires a visible desktop")
         }
         _ = NSApplication.shared
-        let lanes = try (0..<3).map { laneIndex in
+        let imageURL = "https://jira.example.test/avatar.png"
+        let avatar = NSImage(size: NSSize(width: 48, height: 48), flipped: false) { bounds in
+            NSColor.systemBlue.setFill()
+            NSBezierPath(ovalIn: bounds).fill()
+            NSColor.white.setFill()
+            NSBezierPath(ovalIn: bounds.insetBy(dx: 14, dy: 10)).fill()
+            return true
+        }
+        let images = [imageURL: avatar]
+        let laneCounts = [4, 62, 29, 55]
+        let lanes = try laneCounts.indices.map { laneIndex in
             let columns = try (0..<10).map { columnIndex in
                 let config = BoardConfiguration.Column(name: "Stage \(columnIndex)", statuses: [.init(id: String(columnIndex))], min: nil, max: nil)
-                let count = laneIndex == 0 ? (columnIndex == 0 ? 4 : 0) : (laneIndex == 1 ? 6 : 3)
+                let count = laneCounts[laneIndex] / 10 + (columnIndex < laneCounts[laneIndex] % 10 ? 1 : 0)
                 let issues = try (0..<count).map { number in
                     let data = try JSONSerialization.data(withJSONObject: [
                         "id": "\(laneIndex)-\(columnIndex)-\(number)", "key": "DEMO-\(laneIndex * 100 + columnIndex * 10 + number)",
-                        "fields": ["summary": "Improve search results and keyboard navigation for the project", "issuetype": ["name": "Task"], "priority": ["name": "Medium"], "assignee": ["name": "alex", "displayName": "Alex"]]])
+                        "fields": [
+                            "summary": number % 3 == 0
+                                ? "Improve search results and keyboard navigation for the project, including cached issues and long descriptions"
+                                : "Improve search results and keyboard navigation for the project",
+                            "issuetype": ["name": "Task", "iconUrl": imageURL],
+                            "priority": ["name": "Medium", "iconUrl": imageURL],
+                            "assignee": ["name": "alex", "displayName": "Alex", "avatarUrls": ["48x48": imageURL]],
+                            "epic": ["id": 999, "key": "DEMO-999", "name": "Platform improvements and offline access", "color": ["key": "color_2"]]
+                        ]])
                     return try JSONDecoder().decode(JiraIssue.self, from: data)
                 }
                 return BoardColumn(id: laneIndex * 10 + columnIndex, configuration: config, issues: issues, total: issues.count)
@@ -242,7 +265,7 @@ final class BoardCanvasTests: XCTestCase {
         }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        let host = NSHostingView(rootView: BoardCanvas(columns: lanes.flatMap(\.columns), lanes: lanes, images: [:], selectedKey: nil, openIssue: { _ in }))
+        let host = NSHostingView(rootView: BoardCanvas(columns: lanes.flatMap(\.columns), lanes: lanes, images: images, selectedKey: nil, openIssue: { _ in }))
         window.contentView = host
         window.orderFront(nil)
         defer { window.contentView = nil; window.close() }
