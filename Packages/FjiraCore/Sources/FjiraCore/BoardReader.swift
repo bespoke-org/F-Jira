@@ -14,7 +14,16 @@ public final class BoardReader {
     public private(set) var listError: String?
     public private(set) var isOffline = false
     public var filterText = "" { didSet { resetVisibleLimits() } }
-    public var onlyMyIssues = false { didSet { resetVisibleLimits() } }
+    public var selectedAssigneeID: String? {
+        didSet {
+            if oldValue != selectedAssigneeID {
+                rebuildAssignees()
+                resetVisibleLimits()
+            }
+        }
+    }
+    public private(set) var assignees: [JiraUser] = []
+    public var currentUserID: String { account }
     public private(set) var columns: [BoardColumn] = []
     public private(set) var lanes: [BoardLane] = []
     public private(set) var loadingColumnID: Int?
@@ -62,11 +71,27 @@ public final class BoardReader {
 
     private func rebuildColumns() {
         if snapshot?.laneSnapshots != nil {
-            lanes = snapshot?.lanes(matching: filterText, assignee: onlyMyIssues ? account : nil, limits: visibleLimits) ?? []
+            lanes = snapshot?.lanes(matching: filterText, assignee: selectedAssigneeID, limits: visibleLimits) ?? []
             columns = lanes.flatMap(\.columns)
         } else {
             lanes = []
-            columns = snapshot?.columns(matching: filterText, assignee: onlyMyIssues ? account : nil, limits: visibleLimits) ?? []
+            columns = snapshot?.columns(matching: filterText, assignee: selectedAssigneeID, limits: visibleLimits) ?? []
+        }
+    }
+
+    private func rebuildAssignees() {
+        let selected = assignees.first { $0.identifier == selectedAssigneeID }
+        var users: [String: JiraUser] = [:]
+        // Ignore current text/person filters and display limits, but respect board membership.
+        for issue in snapshot?.columns().flatMap(\.issues) ?? [] {
+            if let user = issue.fields.assignee { users[user.identifier] = user }
+        }
+        // Keep the active choice named if a refresh leaves that person with no matching cards.
+        if let selected, users[selected.identifier] == nil { users[selected.identifier] = selected }
+        assignees = users.values.sorted {
+            if ($0.identifier == account) != ($1.identifier == account) { return $0.identifier == account }
+            let order = $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
+            return order == .orderedSame ? $0.identifier < $1.identifier : order == .orderedAscending
         }
     }
 
@@ -178,6 +203,8 @@ public final class BoardReader {
         cancelBoard()
         selectedBoardID = id
         snapshot = id.flatMap { recent[$0] }
+        selectedAssigneeID = nil
+        rebuildAssignees()
         filterText = ""
         errorMessage = nil
         isOffline = false
@@ -201,6 +228,8 @@ public final class BoardReader {
         boards = []
         selectedBoardID = nil
         snapshot = nil
+        selectedAssigneeID = nil
+        assignees = []
         columns = []
         lanes = []
         isLoadingBoards = false
@@ -317,6 +346,7 @@ public final class BoardReader {
     private func present(_ board: CachedBoard, images: [String: CachedAvatar] = [:]) {
         let board = board.reconciling(recent[board.board.id]?.issues ?? [], preferOnEqual: false)
         snapshot = board
+        rebuildAssignees()
         rebuildColumns()
         recent[board.board.id] = board
         recentOrder.removeAll { $0 == board.board.id }
@@ -331,6 +361,7 @@ public final class BoardReader {
         for id in recent.keys { recent[id] = recent[id]?.reconciling(issues) }
         if let snapshot {
             self.snapshot = snapshot.reconciling(issues)
+            rebuildAssignees()
             rebuildColumns()
         }
     }

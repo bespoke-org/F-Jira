@@ -44,7 +44,7 @@ struct BoardsView: View {
                                 selectedKey: model.issueReader.selection?.key,
                                 loadingColumnID: reader.loadingColumnID, columnErrors: reader.columnErrors,
                                 canLoadMore: !reader.isLoading,
-                                automaticallyLoadMore: reader.filterText.isEmpty && !reader.onlyMyIssues && !reader.isOffline,
+                                automaticallyLoadMore: reader.filterText.isEmpty && reader.selectedAssigneeID == nil && !reader.isOffline,
                                 loadMore: { reader.loadMore(column: $0) },
                                 openIssue: { model.issueReader.open($0) })
                         .id(snapshot.board.id)

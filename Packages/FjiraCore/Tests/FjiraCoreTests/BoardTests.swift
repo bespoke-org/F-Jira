@@ -120,6 +120,56 @@ final class BoardTests: XCTestCase {
     }
 
     @MainActor
+    func testAssigneePickerUsesAllCachedBoardCardsAndKeepsSelectionStableOffline() async throws {
+        let cache = try ConnectionCache(path: ":memory:")
+        let bob = BoardFixture.issue("BOB-1", summary: "Fix login", user: "bob")
+            .replacingOccurrences(of: #""name":"bob""#, with: #""name":"bob-login","key":"bob-key""#)
+        let issues = (0..<55).map { BoardFixture.issue("ALICE-\($0)") } + [
+            bob,
+            BoardFixture.issue("HIDDEN-1", status: "99", user: "carol"),
+            BoardFixture.issue("UNASSIGNED-1", status: "20", user: nil)
+        ]
+        try await seed(cache, snapshots: [BoardFixture.snapshot(page: BoardFixture.page(issues: issues))])
+        let reader = BoardReader(site: site, account: "alice", cache: cache,
+                                 client: JiraClient(transport: BoardFixtureTransport(failIssues: true))) { "token" }
+        reader.openProject("10000")
+        try await eventually { reader.snapshot != nil && !reader.isLoading && !reader.isLoadingBoards }
+        XCTAssertTrue(reader.isOffline)
+        XCTAssertEqual(reader.columns.first?.issues.count, 50)
+        XCTAssertEqual(reader.assignees.map(\.identifier), ["alice", "bob-key"],
+                       "Include people beyond the visible page, but exclude cards outside the board's columns")
+
+        reader.selectedAssigneeID = "bob-key"
+        XCTAssertEqual(reader.columns.flatMap(\.issues).map(\.key), ["BOB-1"])
+        reader.filterText = "absent"
+        XCTAssertTrue(reader.columns.allSatisfy { $0.issues.isEmpty })
+        XCTAssertEqual(reader.assignees.map(\.identifier), ["alice", "bob-key"],
+                       "Filtering must not remove people from the picker")
+        reader.filterText = "login"
+        XCTAssertEqual(reader.columns.flatMap(\.issues).map(\.key), ["BOB-1"])
+
+        reader.refresh()
+        try await eventually { !reader.isLoading && !reader.isLoadingBoards }
+        XCTAssertEqual(reader.selectedAssigneeID, "bob-key")
+        XCTAssertEqual(reader.columns.flatMap(\.issues).map(\.key), ["BOB-1"])
+
+        let reassigned = try JSONDecoder().decode(JiraIssue.self, from: Data(
+            BoardFixture.issue("BOB-1", summary: "Fix login", user: "alice").utf8))
+        reader.applyKnownIssues([reassigned])
+        XCTAssertTrue(reader.columns.allSatisfy { $0.issues.isEmpty })
+        XCTAssertEqual(reader.assignees.last?.identifier, "bob-key",
+                       "Keep the selected person's name when their last task is reassigned")
+        reader.selectedAssigneeID = nil
+        XCTAssertEqual(reader.assignees.map(\.identifier), ["alice"])
+        XCTAssertEqual(reader.columns.flatMap(\.issues).map(\.key), ["BOB-1"])
+        reader.selectedAssigneeID = "alice"
+        reader.selectBoard(2)
+        XCTAssertNil(reader.selectedAssigneeID, "A different board starts with all assignees")
+        reader.reset()
+        XCTAssertTrue(reader.assignees.isEmpty)
+    }
+
+    @MainActor
     func testLateBoardResponseCannotReplaceNewSelectionAndMemoryIsImmediate() async throws {
         let cache = try ConnectionCache(path: ":memory:")
         try await seed(cache, snapshots: [BoardFixture.snapshot(), BoardFixture.snapshot(id: 2)])

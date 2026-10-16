@@ -204,8 +204,12 @@ Kanban boards apply their configured subquery and the board's cutoff for older
 completed tasks. When Kanban backlog is enabled, its separate backlog column is
 excluded from the working board. Scrum boards show issues in active
 sprints. A board can include issues from several projects, matching its Jira filter.
-**Filter cards** searches downloaded keys and titles; **Only my issues** filters by
-assignee. These filters work offline. Board lists, configurations, issue pages,
+**Filter cards** searches downloaded keys and titles. The separate **Assignee** picker
+filters by any person assigned to downloaded board cards, with your account marked
+**Me** and **All assignees** clearing the filter. Its choices include all sections
+and cached cards beyond the visible page, regardless of the current text filter.
+More people appear as additional cards are downloaded. Both filters work offline;
+switching boards clears the assignee selection. Board lists, configurations, issue pages,
 selection, and images are cached per Jira site and account. Cached boards appear
 before refreshing. Each column in each swimlane initially fetches up to 50 cards, with more loaded
 when you scroll to its bottom. Column headers show Jira's total when available;

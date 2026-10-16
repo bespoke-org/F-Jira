@@ -100,7 +100,7 @@ struct BrowserView: View {
                         ToolbarItem(placement: .primaryAction) { Spacer() }
                     }
                     if selectedView == .boards {
-                        BoardToolbar(reader: model.boardReader, commands: commandContext)
+                        BoardToolbar(reader: model.boardReader, commands: commandContext, images: model.tableImages)
                     } else if selectedView == .dashboard {
                         ToolbarItemGroup(placement: .primaryAction) {
                             if model.dashboardReader.isLoading {

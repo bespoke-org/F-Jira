@@ -87,6 +87,13 @@ final class BoardSwimlaneTests: XCTestCase {
         try await eventually { offline.loadingColumnID == nil }
         XCTAssertEqual(offline.lanes[0].columns[1].issues.count, 60)
         XCTAssertTrue(offline.isOffline)
+        XCTAssertEqual(offline.assignees.map(\.identifier), ["user-1", "user-2", "user-3"])
+        offline.selectedAssigneeID = "user-2"
+        XCTAssertEqual(offline.lanes.filter { !$0.isEmpty }.map(\.name), ["Regular work"])
+        XCTAssertEqual(offline.columns.flatMap(\.issues).count, 1)
+        XCTAssertEqual(offline.assignees.count, 3, "People from other swimlanes must remain selectable")
+        offline.selectedAssigneeID = nil
+        XCTAssertEqual(offline.lanes.filter { !$0.isEmpty }.count, 3)
         offline.reset()
     }
 
@@ -129,7 +136,7 @@ private actor SwimlaneTransport: JiraTransport {
             let total = lane == 4 ? 0 : (status == "10" ? 1 : (lane == 1 ? 60 : 0))
             let end = min(total, offset + 50)
             let issues = (offset..<max(offset, end)).map { index in
-                "{\"id\":\"\(lane)-\(status)-\(index)\",\"key\":\"EX-\(lane)-\(index)\",\"fields\":{\"summary\":\"Fixture\",\"status\":{\"name\":\"Status\",\"id\":\"\(status)\"}}}"
+                "{\"id\":\"\(lane)-\(status)-\(index)\",\"key\":\"EX-\(lane)-\(index)\",\"fields\":{\"summary\":\"Fixture\",\"status\":{\"name\":\"Status\",\"id\":\"\(status)\"},\"assignee\":{\"name\":\"user-\(lane)\",\"displayName\":\"Person \(lane)\"}}}"
             }
             body = "{\"startAt\":\(offset),\"maxResults\":50,\"total\":\(total),\"issues\":[\(issues.joined(separator: ","))]}"
         default: throw JiraError.notFound
