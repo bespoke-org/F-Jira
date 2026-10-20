@@ -458,7 +458,9 @@ struct BrowserView: View {
             && !model.isLoadingCache && !model.isSearching
         return JiraCommandContext([
             .toggleSidebar: JiraCommandAction {
-                sidebarVisibility = sidebarVisibility == .detailOnly ? .all : .detailOnly
+                withAnimation {
+                    sidebarVisibility = sidebarVisibility == .detailOnly ? .all : .detailOnly
+                }
             },
             .closeIssue: JiraCommandAction(isEnabled: model.issueReader.selection != nil) { closeIssue() },
             .goBack: JiraCommandAction(isEnabled: model.issueReader.canGoBack) { model.issueReader.goBack() },
