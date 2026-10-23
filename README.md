@@ -27,3 +27,7 @@ Connect with your Jira URL and a personal access token. Tokens are stored in mac
 Built with Swift, SwiftUI, and AppKit.
 
 [Usage & development](docs/guide.md)
+
+## License
+
+F Jira is licensed under the [GNU General Public License v2.0 only](LICENSE) (`GPL-2.0-only`).
