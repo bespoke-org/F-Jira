@@ -10,6 +10,7 @@ public final class BoardReader {
     public private(set) var snapshot: CachedBoard?
     public private(set) var isLoadingBoards = false
     public private(set) var isLoading = false
+    public private(set) var isRefreshingAutomatically = false
     public private(set) var errorMessage: String?
     public private(set) var listError: String?
     public private(set) var isOffline = false
@@ -44,6 +45,12 @@ public final class BoardReader {
     @ObservationIgnored private var boardGeneration = UUID()
     @ObservationIgnored private var recent: [Int: CachedBoard] = [:]
     @ObservationIgnored private var recentOrder: [Int] = []
+    @ObservationIgnored private var metadata: (boardID: Int, configuration: BoardConfiguration, response: Data,
+                                               swimlanes: BoardSwimlaneSettings, fetchedAt: ContinuousClock.Instant)?
+    @ObservationIgnored private var lastContents: Data?
+    @ObservationIgnored private var changeToken: String?
+    @ObservationIgnored private var changeChecksAvailable = true
+    @ObservationIgnored private var lastFullRefresh: ContinuousClock.Instant?
 
     public init(site: JiraSite, account: String, cache: ConnectionCache, client: JiraClient = JiraClient(),
                 token: @escaping @Sendable () throws -> String) {
@@ -102,6 +109,11 @@ public final class BoardReader {
         visibleLimits[column] = previousLimit + 50
         rebuildColumns()
         let revealedCachedCards = (columns.first { $0.id == column }?.issues.count ?? 0) > visible.issues.count
+        // Upgrade incomplete legacy lane caches through positive membership queries.
+        if saved.laneSnapshots != nil, saved.hasNextPage(column: column), !isOffline {
+            beginLoading(board: saved.board, restore: false)
+            return
+        }
         columnErrors[column] = nil
         loadingColumnID = column
         let generation = boardGeneration
@@ -201,6 +213,11 @@ public final class BoardReader {
     public func selectBoard(_ id: Int?) {
         guard id != selectedBoardID else { return }
         cancelBoard()
+        metadata = nil
+        lastContents = nil
+        changeToken = nil
+        changeChecksAvailable = true
+        lastFullRefresh = nil
         selectedBoardID = id
         snapshot = id.flatMap { recent[$0] }
         selectedAssigneeID = nil
@@ -219,11 +236,47 @@ public final class BoardReader {
         beginLoading(board: board, restore: snapshot == nil)
     }
 
+    /// The visible board owns this task. Cancellation stops only the refresh started by this loop.
+    public func refreshAutomatically(every interval: Duration = .seconds(5), fullRefreshEvery: Duration = .seconds(60)) async {
+        guard interval > .zero, fullRefreshEvery > .zero else { return }
+        var delay = interval
+        var failures = 0
+        while !Task.isCancelled {
+            do { try await Task.sleep(for: delay) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            delay = interval
+            guard !isLoading, loadingColumnID == nil,
+                  let board = selectedBoard else { continue }
+            let started = ContinuousClock.now
+            beginLoading(board: board, restore: snapshot == nil, automatic: true, maximumAge: fullRefreshEvery)
+            guard let task = boardTask else { continue }
+            await withTaskCancellationHandler {
+                await task.value
+            } onCancel: {
+                task.cancel()
+            }
+            if errorMessage != nil {
+                failures = min(failures + 1, 4)
+                delay = min(.seconds(60), interval * (1 << failures))
+            } else {
+                failures = 0
+                // Aim for a five-second cadence; slow refreshes still get a breathing gap.
+                delay = max(min(interval, .seconds(1)), interval - started.duration(to: .now))
+            }
+        }
+    }
+
     public func reset() {
         listTask?.cancel()
         listGeneration = UUID()
         listTask = nil
         cancelBoard()
+        metadata = nil
+        lastContents = nil
+        changeToken = nil
+        changeChecksAvailable = true
+        lastFullRefresh = nil
         projectID = nil
         boards = []
         selectedBoardID = nil
@@ -248,17 +301,18 @@ public final class BoardReader {
         boardGeneration = UUID()
         boardTask = nil
         isLoading = false
+        isRefreshingAutomatically = false
     }
 
-    private func beginLoading(board: JiraBoard, restore: Bool) {
+    private func beginLoading(board: JiraBoard, restore: Bool, automatic: Bool = false, maximumAge: Duration = .seconds(60)) {
         cancelBoard()
         let generation = boardGeneration
         let project = projectID
         isLoading = true
-        errorMessage = nil
-        isOffline = false
+        isRefreshingAutomatically = automatic
+        if !automatic { errorMessage = nil; isOffline = false }
         boardTask = Task {
-            defer { if boardGeneration == generation { isLoading = false; boardTask = nil } }
+            defer { if boardGeneration == generation { isLoading = false; isRefreshingAutomatically = false; boardTask = nil } }
             do {
                 if restore {
                     let saved = try await cache.loadBoardPresentation(site: site.identifier, account: account, boardID: board.id)
@@ -266,66 +320,139 @@ public final class BoardReader {
                     guard boardGeneration == generation else { return }
                     if let saved { present(saved.board, images: saved.images) }
                 }
-                if let project {
+                if !automatic, let project {
                     try await cache.saveBoardSelection(board.id, site: site.identifier, account: account, project: project)
                 }
                 let credential = try await credentials()
-                let (serverConfiguration, response) = try await client.boardConfiguration(site: site, token: credential, boardID: board.id)
-                try Task.checkCancellation()
-                guard boardGeneration == generation else { return }
-                try await cache.saveBoardResponse(response, site: site.identifier, account: account, boardID: board.id, resource: "configuration")
-                let swimlanes = try await client.boardSwimlanes(site: site, token: credential, boardID: board.id)
-                try Task.checkCancellation()
-                guard boardGeneration == generation else { return }
-                try await cache.saveBoardResponse(swimlanes.response, site: site.identifier, account: account,
-                                                  boardID: board.id, resource: "swimlanes")
+                let fullRefreshDue = lastFullRefresh.map { $0.duration(to: .now) >= maximumAge } ?? true
+                var candidateToken: BoardChangeToken?
+                if changeChecksAvailable {
+                    do {
+                        candidateToken = try await client.boardChangeToken(site: site, token: credential,
+                                                                          boardID: board.id, previous: changeToken)
+                    } catch {
+                        try Task.checkCancellation()
+                        guard boardGeneration == generation else { return }
+                        switch error {
+                        case JiraError.notFound, JiraError.forbidden, JiraError.invalidResponse,
+                             JiraError.queryRejected, JiraError.redirected:
+                            // Private endpoint absent on this deployment: keep polling the public API.
+                            changeChecksAvailable = false
+                        default:
+                            if automatic { throw error }
+                        }
+                    }
+                    try Task.checkCancellation()
+                    guard boardGeneration == generation else { return }
+                    if automatic, !fullRefreshDue, snapshot != nil, candidateToken?.unchanged == true {
+                        errorMessage = nil
+                        isOffline = false
+                        return
+                    }
+                }
+                let metadataExpired = metadata.map { $0.boardID != board.id || $0.fetchedAt.duration(to: .now) >= maximumAge } ?? true
+                if !automatic || metadataExpired {
+                    async let configRequest = client.boardConfiguration(site: site, token: credential, boardID: board.id)
+                    async let laneRequest = client.boardSwimlanes(site: site, token: credential, boardID: board.id)
+                    let ((configuration, response), swimlanes) = try await (configRequest, laneRequest)
+                    try Task.checkCancellation()
+                    guard boardGeneration == generation else { return }
+                    metadata = (board.id, configuration, response, swimlanes, .now)
+                }
+                guard let metadata else { throw JiraError.invalidResponse }
+                let (serverConfiguration, response, swimlanes) = (metadata.configuration, metadata.response, metadata.swimlanes)
                 let configuration = serverConfiguration.excludingKanbanBacklog(board.type == "kanban" && swimlanes.kanbanBacklogEnabled)
+                if !swimlanes.lanes.isEmpty {
+                    let result = try await client.boardContents(site: site, token: credential, board: board,
+                        configuration: configuration, configurationResponse: response, settings: swimlanes)
+                    try Task.checkCancellation()
+                    guard boardGeneration == generation else { return }
+                    let signature = try result.contentsSignature()
+                    if automatic, snapshot != nil, lastContents == signature {
+                        changeToken = candidateToken?.value
+                        lastFullRefresh = .now
+                        errorMessage = nil
+                        isOffline = false
+                        return
+                    }
+                    var verified = Set<String>()
+                    // Only full card records participate in revision reconciliation, never membership responses.
+                    let issues = result.issues
+                    let page = CachedIssuePage(page: IssuePage(startAt: 0, maxResults: max(1, issues.count), total: issues.count,
+                        issues: issues, warningMessages: nil), response: Data(), fetchedAt: result.fetchedAt)
+                    try await reconcile(page, configuration: configuration, column: nil, credential: credential, verified: &verified)
+                    try Task.checkCancellation()
+                    guard boardGeneration == generation else { return }
+                    try await cache.saveBoard(result, site: site.identifier, account: account)
+                    let saved = try await cache.loadBoardPresentation(site: site.identifier, account: account, boardID: board.id)
+                    try Task.checkCancellation()
+                    guard boardGeneration == generation else { return }
+                    if let saved { present(saved.board, images: saved.images) }
+                    lastContents = signature
+                    changeToken = candidateToken?.value
+                    lastFullRefresh = .now
+                    errorMessage = nil
+                    isOffline = false
+                    return
+                }
                 var result = CachedBoard(board: board, configuration: configuration, configurationResponse: response,
                                          pages: [], isComplete: false, fetchedAt: Date())
                 result.columnPages = [:]
                 result.retainedIssues = snapshot?.completedIssuesCutoff == swimlanes.completedIssuesCutoff ? snapshot?.issues : nil
                 result.swimlanesResponse = swimlanes.response
                 result.completedIssuesCutoff = swimlanes.completedIssuesCutoff
-                if !swimlanes.lanes.isEmpty {
-                    result.retainedIssues = nil
-                    result.laneSnapshots = swimlanes.lanes.map { lane in
-                        var child = CachedBoard(board: board, configuration: configuration, configurationResponse: response,
-                                                pages: [], isComplete: false, fetchedAt: Date())
-                        child.columnPages = [:]
-                        child.completedIssuesCutoff = swimlanes.completedIssuesCutoff
-                        if snapshot?.completedIssuesCutoff == swimlanes.completedIssuesCutoff,
-                           let previous = snapshot?.laneSnapshots?.first(where: { $0.lane == lane }) {
-                            child.retainedIssues = previous.board.issues
-                        }
-                        return CachedBoardLane(lane: lane, board: child)
-                    }
-                }
-                // Fetch one page per column and swimlane. Preserve the previous snapshot until every first page succeeds.
+                // Ungrouped boards retain per-column paging so large Done columns load on demand.
                 let keepPrevious = snapshot != nil
                 let columnCount = configuration.columnConfig.columns.count
-                let cellCount = columnCount * max(1, swimlanes.lanes.count)
-                var verified = Set<String>()
-                for index in 0..<cellCount {
+                let cellCount = columnCount
+                let requests = (0..<cellCount).compactMap { index -> (index: Int, column: Int, filter: String?)? in
                     let scope = result.requestScope(column: index)
-                    if configuration.columnConfig.columns[scope.column].statuses.isEmpty { continue }
-                    let page = try await client.boardIssues(site: site, token: credential, board: board,
-                                                           configuration: configuration, startAt: 0, column: scope.column,
-                                                           swimlaneFilter: scope.filter, completedIssuesCutoff: result.completedIssuesCutoff)
+                    guard !configuration.columnConfig.columns[scope.column].statuses.isEmpty else { return nil }
+                    return (index, scope.column, scope.filter)
+                }
+                let completedIssuesCutoff = result.completedIssuesCutoff
+                var verified = Set<String>()
+                for start in stride(from: 0, to: requests.count, by: JiraClient.boardRequestLimit) {
                     try Task.checkCancellation()
                     guard boardGeneration == generation else { return }
-                    try await reconcile(page, configuration: configuration, column: scope.column,
-                                        credential: credential, verified: &verified)
-                    try Task.checkCancellation()
-                    guard boardGeneration == generation else { return }
-                    try result.append(page, column: index)
-                    try await cache.saveBoardResponse(page.response, site: site.identifier, account: account,
-                                                      boardID: board.id, resource: "column:\(index):0")
-                    if !keepPrevious {
-                        try await cache.saveBoard(result, site: site.identifier, account: account)
-                        let saved = try await cache.loadBoardPresentation(site: site.identifier, account: account, boardID: board.id)
+                    let batch = Array(requests[start..<min(start + JiraClient.boardRequestLimit, requests.count)])
+                    let pages = await withTaskGroup(of: (Int, Result<CachedIssuePage, Error>).self) { group in
+                        for request in batch {
+                            group.addTask { [client, site] in
+                                do {
+                                    try Task.checkCancellation()
+                                    let page = try await client.boardIssues(site: site, token: credential, board: board,
+                                        configuration: configuration, startAt: 0, column: request.column,
+                                        swimlaneFilter: request.filter, completedIssuesCutoff: completedIssuesCutoff)
+                                    return (request.index, .success(page))
+                                } catch { return (request.index, .failure(error)) }
+                            }
+                        }
+                        var pages: [Int: Result<CachedIssuePage, Error>] = [:]
+                        for await (index, page) in group { pages[index] = page }
+                        return pages
+                    }
+                    // Apply in board order so reconciliation and partial first downloads remain deterministic,
+                    // including when a later column fails before an earlier request finishes.
+                    for request in batch {
                         try Task.checkCancellation()
                         guard boardGeneration == generation else { return }
-                        if let saved { present(saved.board, images: saved.images) }
+                        guard let response = pages[request.index] else { throw JiraError.invalidResponse }
+                        let page = try response.get()
+                        try await reconcile(page, configuration: configuration, column: request.column,
+                                            credential: credential, verified: &verified)
+                        try Task.checkCancellation()
+                        guard boardGeneration == generation else { return }
+                        try result.append(page, column: request.index)
+                        try await cache.saveBoardResponse(page.response, site: site.identifier, account: account,
+                                                          boardID: board.id, resource: "column:\(request.index):0")
+                        if !keepPrevious {
+                            try await cache.saveBoard(result, site: site.identifier, account: account)
+                            let saved = try await cache.loadBoardPresentation(site: site.identifier, account: account, boardID: board.id)
+                            try Task.checkCancellation()
+                            guard boardGeneration == generation else { return }
+                            if let saved { present(saved.board, images: saved.images) }
+                        }
                     }
                 }
                 result.isComplete = (0..<cellCount).allSatisfy { !result.hasNextPage(column: $0) }
@@ -334,6 +461,10 @@ public final class BoardReader {
                 try Task.checkCancellation()
                 guard boardGeneration == generation else { return }
                 if let saved { present(saved.board, images: saved.images) }
+                changeToken = candidateToken?.value
+                lastFullRefresh = .now
+                errorMessage = nil
+                isOffline = false
             } catch is CancellationError { }
             catch let error as URLError where error.code == .cancelled { }
             catch {
@@ -366,10 +497,11 @@ public final class BoardReader {
         }
     }
 
-    private func reconcile(_ page: CachedIssuePage, configuration: BoardConfiguration, column: Int,
+    private func reconcile(_ page: CachedIssuePage, configuration: BoardConfiguration, column: Int?,
                            credential: String, verified: inout Set<String>) async throws {
         let merged = try await cache.reconcileIssues(page.page.issues, site: site.identifier, account: account)
-        let statuses = Set(configuration.columnConfig.columns[column].statuses.map(\.id))
+        let statuses = Set((column.map { configuration.columnConfig.columns[$0].statuses }
+                            ?? configuration.columnConfig.columns.flatMap(\.statuses)).map(\.id))
         let misplaced = page.page.issues.filter { issue in
             issue.fields.status?.id.map { !statuses.contains($0) } ?? false
         }

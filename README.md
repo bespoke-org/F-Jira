@@ -211,8 +211,18 @@ and cached cards beyond the visible page, regardless of the current text filter.
 More people appear as additional cards are downloaded. Both filters work offline;
 switching boards clears the assignee selection. Board lists, configurations, issue pages,
 selection, and images are cached per Jira site and account. Cached boards appear
-before refreshing. Each column in each swimlane initially fetches up to 50 cards, with more loaded
-when you scroll to its bottom. Column headers show Jira's total when available;
+before refreshing. Custom swimlane boards fetch the visible board once for card fields
+and each original non-default lane query for membership. Cards go into the first
+matching lane locally, including cards with empty fields that JQL negation could omit.
+These collections use a rolling pool of up to 32 requests, request 100 records per
+page, and follow the server's actual page sizes until complete. Only the board query
+downloads full card fields. Membership queries request status only.
+If Jira responds with HTTP 429, requests for the same server and credential share a cooldown
+and honor `Retry-After`. Requests retry up to three times with exponential backoff and jitter.
+Each column displays up to 50 cards initially, revealing more when you scroll to
+its bottom. Custom lane collections are downloaded completely before publishing;
+ungrouped boards keep fetching 50 cards per column on demand so large Done columns
+do not delay small columns. Column headers show Jira's total when available;
 the paging footer shows how many cards are displayed. Cached boards also start
 with at most 50 cards per column. Previously downloaded cards remain available
 offline, including older cards beyond the refreshed first page. Older results are
@@ -221,6 +231,28 @@ all downloaded cards; use **Load more** explicitly while filtering to fetch more
 Failed refreshes preserve the previous board, and failed next-page requests can
 be retried without skipping cards. The board refresh button updates both the current
 board and the available board list.
+
+While Boards is open and the app is active, the selected board refreshes automatically
+on a five-second cadence. Checks never overlap; slow requests get at least a one-second
+gap after completion. Failed checks back off to 10, 20, 40, then 60 seconds, with the
+normal cadence restored after success. Automatic refreshes skip ongoing refreshes and
+page loads, keep the displayed cards if a request fails, and do not show a toolbar spinner.
+Jira's web-board `etag` check skips card queries when the board is unchanged. A changed
+token triggers the public API refresh; the new token is saved only after that succeeds.
+Every 60 seconds a full check refreshes configuration and membership even if the token
+is unchanged. Servers without this private endpoint fall back to public API polling.
+Unchanged custom-board contents also skip cache writes and presentation callbacks.
+Automatic checks reuse board configuration for up to 60 seconds and do not refresh the board picker
+list. Manual refresh always reloads configuration. Configuration requests run concurrently;
+the edit model uses `expand=workingDaysConfig` with a full-response fallback when required
+settings are absent or the projection is rejected. Switching away from Boards or making the
+app inactive pauses automatic refresh and cancels any automatic refresh in progress.
+Manual refresh can interrupt an automatic check and always forces a full refresh.
+
+Jira Server's supported push option is a webhook, which requires Jira administrator
+registration and an HTTP callback reachable from Jira. This desktop app uses polling;
+it does not register webhooks or run a public callback service.
+[Atlassian webhook documentation](https://developer.atlassian.com/server/jira/platform/webhooks/)
 
 Issue fields are shared between board cards, search results, and full details.
 The newest Jira `updated` timestamp wins, so a stale node response cannot roll a

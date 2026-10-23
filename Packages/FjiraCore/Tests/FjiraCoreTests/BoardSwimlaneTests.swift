@@ -5,14 +5,14 @@ import XCTest
 final class BoardSwimlaneTests: XCTestCase {
     private let site = try! JiraSite("https://jira.example.com/jira")
 
-    func testCustomLanesKeepServerOrderAndExcludeEarlierMatches() throws {
+    func testCustomLanesKeepServerOrderAndPositiveQueries() throws {
         let config = try JSONDecoder().decode(SwimlaneConfiguration.self, from: Data(SwimlaneFixture.configuration.utf8))
         let lanes = try config.lanes()
         XCTAssertEqual(lanes.map(\.name), ["Expedite", "Regular work", "Improvements", "Everything else"])
         XCTAssertEqual(lanes[0].filter, "(priority = Blocker)")
-        XCTAssertEqual(lanes[1].filter, "(issuetype = Task) AND NOT ((priority = Blocker))")
-        XCTAssertEqual(lanes[2].filter, "(issuetype = Improvement) AND NOT ((priority = Blocker) OR (issuetype = Task))")
-        XCTAssertEqual(lanes[3].filter, "NOT ((priority = Blocker) OR (issuetype = Task) OR (issuetype = Improvement))")
+        XCTAssertEqual(lanes[1].filter, "(issuetype = Task)")
+        XCTAssertEqual(lanes[2].filter, "(issuetype = Improvement)")
+        XCTAssertEqual(lanes[3].filter, "")
         XCTAssertTrue(lanes[3].isDefault)
     }
 
@@ -66,11 +66,10 @@ final class BoardSwimlaneTests: XCTestCase {
         XCTAssertFalse(reader.lanes[0].columns[1].hasMore)
         XCTAssertEqual(reader.lanes[1].columns[0].issues.count, 1)
         let requests = await transport.requests
-        let paging = try XCTUnwrap(requests.last { $0.url?.lastPathComponent == "issue" })
-        let query = URLComponents(url: paging.url!, resolvingAgainstBaseURL: false)!.queryItems!
-        XCTAssertEqual(query.first { $0.name == "startAt" }?.value, "50")
-        XCTAssertTrue(query.first { $0.name == "jql" }!.value!.contains("status in (20)"))
-        XCTAssertTrue(query.first { $0.name == "jql" }!.value!.contains("AND ((priority = Blocker))"))
+        let issues = requests.filter { $0.url?.lastPathComponent == "issue" }
+        XCTAssertEqual(issues.count, 6, "Board and positive lanes paginate once, scrolling uses cached cards")
+        XCTAssertFalse(issues.contains { $0.url!.absoluteString.contains("NOT") })
+        let query = URLComponents(url: issues[0].url!, resolvingAgainstBaseURL: false)!.queryItems!
         XCTAssertTrue(query.first { $0.name == "jql" }!.value!.contains("AND (status not in (20) OR updated >= -1w)"))
         let saved = try await cache.loadBoardPresentation(site: site.identifier, account: "alice", boardID: 1)
         XCTAssertEqual(saved?.board.laneSnapshots?.count, 4)
@@ -127,15 +126,20 @@ private actor SwimlaneTransport: JiraTransport {
             let query = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!
             let jql = query.first { $0.name == "jql" }!.value!
             let offset = Int(query.first { $0.name == "startAt" }!.value!)!
-            let lane: Int
-            if jql.contains("AND ((issuetype = Improvement)") { lane = 3 }
-            else if jql.contains("AND ((issuetype = Task)") { lane = 2 }
-            else if jql.contains("AND ((priority = Blocker))") { lane = 1 }
-            else { lane = 4 }
-            let status = jql.hasPrefix("status in (20)") ? "20" : "10"
-            let total = lane == 4 ? 0 : (status == "10" ? 1 : (lane == 1 ? 60 : 0))
+            let lane: Int?
+            if jql.contains("AND (issuetype = Improvement)") { lane = 3 }
+            else if jql.contains("AND (issuetype = Task)") { lane = 2 }
+            else if jql.contains("AND (priority = Blocker)") { lane = 1 }
+            else { lane = nil }
+            var allCards: [(Int, String, Int)] = []
+            for index in 1...3 {
+                allCards.append((index, "10", 0))
+                if index == 1 { allCards += (0..<60).map { (index, "20", $0) } }
+            }
+            let cards = allCards.filter { lane == nil || $0.0 == lane }
+            let total = cards.count
             let end = min(total, offset + 50)
-            let issues = (offset..<max(offset, end)).map { index in
+            let issues = cards[offset..<max(offset, end)].map { lane, status, index in
                 "{\"id\":\"\(lane)-\(status)-\(index)\",\"key\":\"EX-\(lane)-\(index)\",\"fields\":{\"summary\":\"Fixture\",\"status\":{\"name\":\"Status\",\"id\":\"\(status)\"},\"assignee\":{\"name\":\"user-\(lane)\",\"displayName\":\"Person \(lane)\"}}}"
             }
             body = "{\"startAt\":\(offset),\"maxResults\":50,\"total\":\(total),\"issues\":[\(issues.joined(separator: ","))]}"

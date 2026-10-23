@@ -93,22 +93,18 @@ struct BrowserView: View {
                         Text((selectedView ?? .dashboard).title).font(.title2.bold())
                     }
                 }
-                if model.selectedProject != nil && selectedView != .issues {
+                if model.selectedProject != nil {
                     if #available(macOS 26.0, *) {
                         ToolbarSpacer(.flexible, placement: .primaryAction)
                     } else {
                         ToolbarItem(placement: .primaryAction) { Spacer() }
                     }
                     if selectedView == .boards {
-                        BoardToolbar(reader: model.boardReader, commands: commandContext, images: model.tableImages)
-                    } else if selectedView == .dashboard {
+                        BoardToolbar(reader: model.boardReader, commands: commandContext, images: model.tableImages,
+                                     isRefreshing: isRefreshing)
+                    } else {
                         ToolbarItemGroup(placement: .primaryAction) {
-                            if model.dashboardReader.isLoading {
-                                ProgressView().controlSize(.small)
-                                    .frame(width: 32, height: 28)
-                                    .accessibilityLabel("Updating")
-                            }
-                            JiraCommandIconButton(.refresh, context: commandContext)
+                            JiraCommandIconButton(.refresh, context: commandContext, isLoading: isRefreshing)
                         }
                     }
                 }
@@ -258,10 +254,16 @@ struct BrowserView: View {
                     Text(message).font(.caption).foregroundStyle(.red)
                 }
                 HStack {
-                    Button("Refresh projects", systemImage: "arrow.clockwise") { model.refreshProjects() }
+                    Button { model.refreshProjects() } label: {
+                        Label {
+                            Text("Refresh projects")
+                        } icon: {
+                            JiraCommandSymbol(.refresh, isLoading: model.isLoadingProjects)
+                        }
+                    }
                         .disabled(model.isLoadingProjects)
+                        .accessibilityValue(model.isLoadingProjects ? "Updating" : "")
                     Spacer()
-                    if model.isLoadingProjects { ProgressView().controlSize(.small) }
                 }
                 if let date = model.projectsFetchedAt {
                     Text("Updated \(date.formatted(date: .abbreviated, time: .shortened))")
@@ -446,13 +448,23 @@ struct BrowserView: View {
         model.issueReader.close()
     }
 
+    private var isRefreshing: Bool {
+        if model.issueReader.selection != nil || (selectedView == .issues && selectedIssue != nil) {
+            return model.issueReader.isLoading
+        }
+        if selectedView == .boards {
+            return (model.boardReader.isLoading && !model.boardReader.isRefreshingAutomatically) || model.boardReader.isLoadingBoards
+        }
+        return selectedView == .dashboard ? model.dashboardReader.isLoading : model.isSearching
+    }
+
     private var commandContext: JiraCommandContext {
         let showingBoards = selectedView == .boards
         let showingDashboard = selectedView == .dashboard
         let currentIssue = model.issueReader.selection ?? (selectedView == .issues ? selectedIssue : nil)
         let board = showingBoards ? model.boardReader.selectedBoard : nil
         let canRefreshBoard = showingBoards && model.selectedProject != nil
-            && !model.boardReader.isLoading && !model.boardReader.isLoadingBoards
+            && (!model.boardReader.isLoading || model.boardReader.isRefreshingAutomatically) && !model.boardReader.isLoadingBoards
         let canRefreshDashboard = showingDashboard && model.selectedProject != nil && !model.dashboardReader.isLoading
         let canSearch = selectedView == .issues && model.selectedProject != nil && !model.isRestoring
             && !model.isLoadingCache && !model.isSearching

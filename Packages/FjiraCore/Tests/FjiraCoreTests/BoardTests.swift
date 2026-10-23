@@ -325,6 +325,103 @@ final class BoardTests: XCTestCase {
         reader.reset()
     }
 
+    @MainActor
+    func testAutomaticRefreshUpdatesOnlySelectedBoardAndPreservesFilters() async throws {
+        let transport = BoardFixtureTransport()
+        let reader = BoardReader(site: site, account: "alice", cache: try ConnectionCache(path: ":memory:"),
+                                 client: JiraClient(transport: transport)) { "token" }
+        defer { reader.reset() }
+        reader.openProject("10000")
+        try await eventually { reader.snapshot != nil && !reader.isLoading && !reader.isLoadingBoards }
+        let previous = reader.snapshot?.fetchedAt
+        reader.filterText = "NEW"
+        reader.selectedAssigneeID = "alice"
+        let automatic = Task { await reader.refreshAutomatically(every: .milliseconds(20)) }
+        defer { automatic.cancel() }
+        try await eventually { reader.snapshot?.fetchedAt != previous && !reader.isLoading }
+        automatic.cancel()
+        await automatic.value
+        XCTAssertEqual(reader.filterText, "NEW")
+        XCTAssertEqual(reader.selectedAssigneeID, "alice")
+        XCTAssertEqual(reader.columns.first?.issues.map(\.key), ["NEW-1"])
+        let requests = await transport.requests
+        XCTAssertEqual(requests.filter { $0.url?.lastPathComponent == "board" }.count, 1)
+        XCTAssertEqual(requests.filter { $0.url?.lastPathComponent == "configuration" }.count, 1, "Automatic checks reuse recent settings")
+        try await Task.sleep(for: .milliseconds(60))
+        let afterCancellation = await transport.requests
+        XCTAssertEqual(afterCancellation.count, requests.count)
+    }
+
+    @MainActor
+    func testAutomaticRefreshDoesNotInterruptManualRefreshOrPaging() async throws {
+        for paging in [false, true] {
+            let transport = BoardFixtureTransport()
+            let reader = BoardReader(site: site, account: "alice", cache: try ConnectionCache(path: ":memory:"),
+                                     client: JiraClient(transport: transport)) { "token" }
+            defer { reader.reset() }
+            reader.openProject("10000")
+            try await eventually { reader.snapshot != nil && !reader.isLoading && !reader.isLoadingBoards }
+            await transport.holdIssueRequests(true)
+            if paging { reader.loadMore(column: 0) } else { reader.refresh() }
+            let automatic = Task { await reader.refreshAutomatically(every: .milliseconds(10)) }
+            defer { automatic.cancel() }
+            try await Task.sleep(for: .milliseconds(70))
+            automatic.cancel()
+            await automatic.value
+            let requests = await transport.requests
+            XCTAssertEqual(requests.filter { $0.url?.lastPathComponent == "configuration" }.count, paging ? 1 : 2)
+            if paging { XCTAssertEqual(reader.loadingColumnID, 0) }
+            else { XCTAssertTrue(reader.isLoading) }
+            await transport.holdIssueRequests(false)
+            try await eventually { !reader.isLoading && reader.loadingColumnID == nil }
+            XCTAssertNil(reader.errorMessage)
+        }
+    }
+
+    @MainActor
+    func testCancellingAutomaticRefreshCancelsItsRequestsAndPreservesSnapshot() async throws {
+        let transport = BoardFixtureTransport()
+        let reader = BoardReader(site: site, account: "alice", cache: try ConnectionCache(path: ":memory:"),
+                                 client: JiraClient(transport: transport)) { "token" }
+        defer { reader.reset() }
+        reader.openProject("10000")
+        try await eventually { reader.snapshot != nil && !reader.isLoading && !reader.isLoadingBoards }
+        let previous = reader.snapshot?.fetchedAt
+        await transport.holdIssueRequests(true)
+        let automatic = Task { await reader.refreshAutomatically(every: .milliseconds(10)) }
+        defer { automatic.cancel() }
+        try await eventually { reader.isLoading }
+        automatic.cancel()
+        await automatic.value
+        XCTAssertFalse(reader.isLoading)
+        XCTAssertNil(reader.errorMessage)
+        XCTAssertEqual(reader.snapshot?.fetchedAt, previous)
+        XCTAssertEqual(reader.snapshot?.issues.map(\.key), ["NEW-1"])
+    }
+
+    @MainActor
+    func testFailedAutomaticRefreshPreservesCardsAndRetriesOnNextInterval() async throws {
+        let transport = BoardFixtureTransport()
+        let reader = BoardReader(site: site, account: "alice", cache: try ConnectionCache(path: ":memory:"),
+                                 client: JiraClient(transport: transport)) { "token" }
+        defer { reader.reset() }
+        reader.openProject("10000")
+        try await eventually { reader.snapshot != nil && !reader.isLoading && !reader.isLoadingBoards }
+        let previous = reader.snapshot?.fetchedAt
+        await transport.failDoneColumn()
+        let automatic = Task { await reader.refreshAutomatically(every: .milliseconds(30)) }
+        defer { automatic.cancel() }
+        try await eventually { reader.errorMessage != nil && !reader.isLoading }
+        XCTAssertEqual(reader.snapshot?.fetchedAt, previous)
+        XCTAssertEqual(reader.snapshot?.issues.map(\.key), ["NEW-1"])
+        await transport.failDoneColumn(false)
+        try await eventually { reader.snapshot?.fetchedAt != previous && !reader.isLoading }
+        automatic.cancel()
+        await automatic.value
+        XCTAssertNil(reader.errorMessage)
+        XCTAssertFalse(reader.isOffline)
+    }
+
     private func query(_ request: URLRequest, _ name: String) -> String? {
         URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == name }?.value
     }
@@ -381,13 +478,15 @@ private actor BoardFixtureTransport: JiraTransport {
     private var continuations: [Int: CheckedContinuation<Void, Never>] = [:]
     private var failIssues: Bool
     private var failDone = false
+    private var holdIssues = false
     init(failIssues: Bool = false) { self.failIssues = failIssues }
     func holdConfiguration(_ id: Int) { held.insert(id) }
     func releaseConfiguration(_ id: Int) {
         held.remove(id)
         continuations.removeValue(forKey: id)?.resume()
     }
-    func failDoneColumn() { failDone = true }
+    func failDoneColumn(_ fail: Bool = true) { failDone = fail }
+    func holdIssueRequests(_ hold: Bool) { holdIssues = hold }
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
         let url = request.url!
@@ -403,6 +502,7 @@ private actor BoardFixtureTransport: JiraTransport {
             if held.contains(id) { await withCheckedContinuation { continuations[id] = $0 } }
             body = BoardFixture.configuration(id: id)
         case "issue":
+            while holdIssues { try await Task.sleep(for: .milliseconds(5)) }
             let offset = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "startAt" }!.value!
             let done = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "jql" }!.value!.hasPrefix("status in (20)")
             if failIssues || (failDone && done) { throw URLError(.notConnectedToInternet) }

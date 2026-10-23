@@ -28,8 +28,7 @@ public struct IssueDetailView: View {
                 Text(issue?.key ?? "Issue").font(.custom("Menlo", size: 13, relativeTo: .headline).weight(.semibold)).textSelection(.enabled)
                 if issue?.isFlagged == true { IssueFlagIndicator() }
                 Spacer()
-                if reader.isLoading && reader.detail == nil { ProgressView().controlSize(.small) }
-                JiraCommandIconButton(.refresh, context: commandContext)
+                JiraCommandIconButton(.refresh, context: commandContext, isLoading: reader.isLoading)
                 JiraCommandIconButton(.openInJira, context: commandContext)
                 JiraCommandIconButton(.closeIssue, context: commandContext)
             }

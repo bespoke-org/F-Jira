@@ -117,19 +117,54 @@ public struct JiraCommands: Commands {
     }
 }
 
-public struct JiraCommandIconButton: View {
+/// Shared by refresh buttons with and without text labels.
+public struct JiraCommandSymbol: View {
     let command: JiraCommand
-    let context: JiraCommandContext
+    let isLoading: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    public init(_ command: JiraCommand, context: JiraCommandContext) {
+    public init(_ command: JiraCommand, isLoading: Bool = false) {
         self.command = command
-        self.context = context
+        self.isLoading = isLoading
     }
 
     public var body: some View {
-        Button { context.perform(command) } label: { Image(systemName: command.symbol) }
+        if #available(macOS 15.0, *) {
+            // Keep one symbol and use its authored rotation center throughout the update.
+            Image(systemName: command.symbol)
+                .symbolEffect(.rotate.clockwise, options: .repeat(.continuous).speed(2), isActive: isLoading && !reduceMotion)
+                .transaction { transaction in
+                    // Stop the effect without its animated exit when the button becomes enabled.
+                    if !isLoading || reduceMotion { transaction.disablesAnimations = true }
+                }
+        } else {
+            Image(systemName: command.symbol)
+                .symbolEffect(.pulse, isActive: isLoading && !reduceMotion)
+                .transaction { transaction in
+                    if !isLoading || reduceMotion { transaction.disablesAnimations = true }
+                }
+        }
+    }
+}
+
+public struct JiraCommandIconButton: View {
+    let command: JiraCommand
+    let context: JiraCommandContext
+    let isLoading: Bool
+
+    public init(_ command: JiraCommand, context: JiraCommandContext, isLoading: Bool = false) {
+        self.command = command
+        self.context = context
+        self.isLoading = isLoading
+    }
+
+    public var body: some View {
+        Button { context.perform(command) } label: {
+            JiraCommandSymbol(command, isLoading: isLoading)
+        }
             .help(command.help)
             .accessibilityLabel(command.title)
+            .accessibilityValue(isLoading ? "Updating" : "")
             .disabled(!context.isEnabled(command))
     }
 }

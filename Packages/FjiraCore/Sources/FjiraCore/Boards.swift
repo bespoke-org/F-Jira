@@ -284,7 +284,8 @@ extension JiraClient {
     }
 
     public func boardIssues(site: JiraSite, token: String, board: JiraBoard,
-                            configuration: BoardConfiguration, startAt: Int, column: Int? = nil, swimlaneFilter: String? = nil, completedIssuesCutoff: String? = nil) async throws -> CachedIssuePage {
+                            configuration: BoardConfiguration, startAt: Int, column: Int? = nil, swimlaneFilter: String? = nil, completedIssuesCutoff: String? = nil,
+                            maxResults: Int = 50, membershipOnly: Bool = false) async throws -> CachedIssuePage {
         var filter = try configuration.issueFilter(board: board, column: column)
         if let swimlaneFilter, !swimlaneFilter.isEmpty { filter += " AND (\(swimlaneFilter))" }
         if let cutoff = completedIssuesCutoff {
@@ -301,9 +302,9 @@ extension JiraClient {
         }
         let data = try await fetch("board/\(board.id)/issue", site: site, token: token, queryItems: [
             URLQueryItem(name: "startAt", value: String(startAt)),
-            URLQueryItem(name: "maxResults", value: "50"),
+            URLQueryItem(name: "maxResults", value: String(maxResults)),
             URLQueryItem(name: "jql", value: filter),
-            URLQueryItem(name: "fields", value: "summary,status,assignee,priority,updated,issuetype,project,flagged,epic")
+            URLQueryItem(name: "fields", value: membershipOnly ? "status" : "summary,status,assignee,priority,updated,issuetype,project,flagged,epic")
         ], agile: true)
         let page: IssuePage = try decode(data)
         guard page.startAt == startAt, page.maxResults > 0,

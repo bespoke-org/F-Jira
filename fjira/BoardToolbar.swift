@@ -7,6 +7,7 @@ struct BoardToolbar: ToolbarContent {
     @Bindable var reader: BoardReader
     let commands: JiraCommandContext
     let images: [String: NSImage]
+    let isRefreshing: Bool
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
@@ -17,7 +18,7 @@ struct BoardToolbar: ToolbarContent {
                 ForEach(reader.boards) { board in Text(board.name).tag(Optional(board.id)) }
             }
             .labelsHidden()
-            .frame(maxWidth: 220)
+            .frame(width: 150)
             .disabled(reader.boards.isEmpty)
             .help("Select a board")
         }
@@ -42,12 +43,8 @@ struct BoardToolbar: ToolbarContent {
             ToolbarItem(placement: .primaryAction) { assigneeMenu }
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            if reader.isLoading || reader.isLoadingBoards {
-                ProgressView().controlSize(.small)
-                    .frame(width: 32, height: 28)
-                    .accessibilityLabel("Updating")
-            }
-            JiraCommandIconButton(.refresh, context: commands)
+            JiraCommandIconButton(.refresh, context: commands,
+                                  isLoading: isRefreshing)
         }
     }
 

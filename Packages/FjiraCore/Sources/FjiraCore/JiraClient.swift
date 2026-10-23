@@ -104,6 +104,7 @@ public struct URLSessionTransport: JiraTransport {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = 30
+        configuration.httpMaximumConnectionsPerHost = JiraClient.boardRequestLimit
         configuration.httpShouldSetCookies = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         session = URLSession(configuration: configuration, delegate: RedirectBlocker(), delegateQueue: nil)
@@ -117,12 +118,13 @@ public struct URLSessionTransport: JiraTransport {
 }
 
 public struct JiraClient: Sendable {
+    static let boardRequestLimit = 32
     let transport: any JiraTransport
     let flagFields = JiraFlagFields()
     let epicRequests = JiraEpicRequests()
 
     public init(transport: any JiraTransport = URLSessionTransport()) {
-        self.transport = transport
+        self.transport = JiraRateLimitedTransport(transport: transport)
     }
 
     public func verify(site: JiraSite, token: String) async throws -> CachedConnection {

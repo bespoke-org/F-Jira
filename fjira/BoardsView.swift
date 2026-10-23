@@ -4,6 +4,7 @@ import SwiftUI
 
 struct BoardsView: View {
     @Bindable var model: BrowserModel
+    @Environment(\.scenePhase) private var scenePhase
 
     private var reader: BoardReader { model.boardReader }
 
@@ -63,6 +64,10 @@ struct BoardsView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        .task(id: scenePhase == .active ? reader.selectedBoardID : nil) {
+            guard scenePhase == .active, reader.selectedBoardID != nil else { return }
+            await reader.refreshAutomatically()
         }
     }
 }
